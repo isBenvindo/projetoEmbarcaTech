@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.egg
+*.log
+.dist-info/
+build/
+dist/
+.eggs/
+.coverage
+.coverage.*
+.pytest_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+
+# Virtual environments
+.venv/
+venv/
+back-end/venv/
+
+# Caches
+.cache/
+
+# Env files
+.env
+.env.*
+*.env
+
+# IDE/editor
+.vscode/
+.idea/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PlatformIO (ESP32 firmware)
+.pio/
+.piolibdeps/
+firmware_esp32/.pio/
+firmware_esp32/.piolibdeps/
+
+# Node (in case of frontend later)
+node_modules/
+
+# Misc
+*.bak
+*.tmp
+~$*
