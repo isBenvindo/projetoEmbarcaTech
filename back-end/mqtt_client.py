@@ -101,7 +101,6 @@ def process_sensor_message(payload):
         logger.error(f"Erro inesperado ao processar mensagem do sensor: {e}")
 
 def handle_pizza_pass(timestamp_from_esp, sensor_id):
-    """Salva contagem de pizza no banco de dados"""
     try:
         if not _db_connection_func:
             logger.error("Função de conexão com o DB não configurada")
@@ -110,20 +109,10 @@ def handle_pizza_pass(timestamp_from_esp, sensor_id):
         conn = _db_connection_func()
         cursor = conn.cursor()
         
-        # Insere contagem
-        if timestamp_from_esp:
-            # Converte timestamp ESP32
-            try:
-                esp_timestamp = datetime.fromtimestamp(int(timestamp_from_esp)/1000)
-                cursor.execute(
-                    "INSERT INTO contagens_pizzas (timestamp) VALUES (%s)",
-                    (esp_timestamp,)
-                )
-            except (ValueError, TypeError):
-                # Fallback: timestamp atual
-                cursor.execute("INSERT INTO contagens_pizzas DEFAULT VALUES")
-        else:
-            cursor.execute("INSERT INTO contagens_pizzas DEFAULT VALUES")
+        # Insere a contagem usando o timestamp do próprio servidor
+        cursor.execute(
+            "INSERT INTO contagens_pizzas (timestamp) VALUES (NOW())"
+        )
         
         conn.commit()
         cursor.close()
