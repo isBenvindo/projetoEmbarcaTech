@@ -25,8 +25,11 @@ _client = None
 _last_state = "unknown"
 _last_transition_ms = 0
 _initialized = False   # já recebemos a primeira msg (baseline)?
-_DEBOUNCE_MS = 100     # ignora transições mais rápidas que isso
+_DEBOUNCE_MS = 100     # ignora transições mais rápidas que isso (ms)
 
+# ---------------------------------------------------------------------
+# Callbacks
+# ---------------------------------------------------------------------
 def on_connect(client, userdata, flags, rc, properties=None):
     if rc == 0:
         logger.info(f"MQTT conectado ao broker {MQTT_BROKER_HOST}:{MQTT_BROKER_PORT}")
@@ -45,6 +48,17 @@ def on_disconnect(client, userdata, rc, properties=None):
         logger.warning(f"Desconexão inesperada do MQTT broker. Código: {rc}")  # rc=7 -> CONN_LOST
     # loop_start + reconnect_delay_set já cuidam da reconexão
 
+def _normalize_state(raw_state: str) -> str | None:
+    """Normaliza o estado recebido para {'interrompida','livre'}."""
+    if raw_state is None:
+        return None
+    s = str(raw_state).strip().lower()
+    if s.startswith("interrompid"):   # aceita 'interrompido' e 'interrompida'
+        return "interrompida"
+    if s == "livre":
+        return "livre"
+    return None  # estados desconhecidos são ignorados
+
 def on_message(client, userdata, msg):
     global _last_state, _initialized, _last_transition_ms
 
@@ -57,38 +71,54 @@ def on_message(client, userdata, msg):
         return
 
     try:
-        logger.debug(f"Mensagem recebida no tópico {msg.topic}: {payload_raw} (retained={is_retained})")
-        data = json.loads(payload_raw)
-        current_state = data.get("state")
-        sensor_id = data.get("id", "ESP32_Barreira_001")
-        ts_ms = data.get("timestamp")  # opcional (epoch ms vindo do ESP)
-
-        if not current_state:
-            logger.warning("Campo 'state' ausente no JSON")
+        if not payload_raw:
+            # payload vazio (ex.: limpeza de retained) -> ignora
+            logger.debug("Payload vazio recebido; ignorando")
             return
 
-        logger.info(f"Sensor {sensor_id}: {current_state} (anterior: {_last_state})")
+        logger.debug(f"Mensagem recebida no tópico {msg.topic}: {payload_raw} (retained={is_retained})")
+        data = json.loads(payload_raw)
+
+        # state normalizado
+        state = _normalize_state(data.get("state"))
+        if not state:
+            logger.warning("Campo 'state' ausente/inesperado no JSON")
+            return
+
+        sensor_id = data.get("id", "ESP32_Barreira_001")
+
+        # timestamp (opcional): aceita 'timestamp' ou 'timestamp_ms'
+        ts_ms = data.get("timestamp")
+        if ts_ms is None:
+            ts_ms = data.get("timestamp_ms")
+
+        logger.info(f"Sensor {sensor_id}: {state} (anterior: {_last_state})")
 
         now_ms = int(time.time() * 1000)
         # debounce de transições muito rápidas
         if _last_transition_ms and (now_ms - _last_transition_ms) < _DEBOUNCE_MS:
             logger.debug("Transição ignorada por debounce")
-            _last_state = current_state
+            _last_state = state
             return
 
         # detecção de pizza: interrompida -> livre
-        if _last_state == "interrompida" and current_state == "livre":
+        if _last_state == "interrompida" and state == "livre":
+            logger.info("Pizza detectada! Salvando no banco de dados...")
             handle_pizza_pass(ts_ms, sensor_id)
 
-        _last_state = current_state
+        _last_state = state
         _last_transition_ms = now_ms
         _initialized = True
 
     except json.JSONDecodeError:
-        logger.error(f"Payload não é JSON válido: {payload_raw}")
+        # payload não-JSON: ignore (pode ser retained limpo)
+        logger.debug(f"Payload não-JSON recebido e ignorado: {payload_raw!r}")
     except Exception as e:
         logger.error(f"Erro ao processar mensagem: {e}")
 
+# ---------------------------------------------------------------------
+# Persistência
+# ---------------------------------------------------------------------
 def handle_pizza_pass(timestamp_from_esp_ms, sensor_id):
     try:
         if not _db_connection_func:
@@ -118,6 +148,9 @@ def on_publish(client, userdata, mid):
 def on_subscribe(client, userdata, mid, granted_qos, properties=None):
     logger.debug(f"Inscrição confirmada ID: {mid}, QoS: {granted_qos}")
 
+# ---------------------------------------------------------------------
+# Bootstrap do cliente
+# ---------------------------------------------------------------------
 def start_mqtt_client(db_connection_func):
     global _db_connection_func, _client
     _db_connection_func = db_connection_func
@@ -137,9 +170,9 @@ def start_mqtt_client(db_connection_func):
 
     # reconexão com backoff (1..30s)
     _client.reconnect_delay_set(min_delay=1, max_delay=30)
-    # limitar inflight / retry ajuda em broker público
+    # limitar inflight ajuda em broker público
     _client.max_inflight_messages_set(10)
-    _client.message_retry_set(5)
+    # REMOVIDO: message_retry_set não existe no paho-mqtt 2.x
 
     _client.on_connect = on_connect
     _client.on_disconnect = on_disconnect
