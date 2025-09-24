@@ -1,6 +1,6 @@
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
-paho-mqtt==2.1.0
+paho-mqtt==1.6.1      # <- voltar para a API estável que seu código usa
 psycopg2-binary==2.9.10
 python-dotenv==1.0.0
 pydantic==2.5.0

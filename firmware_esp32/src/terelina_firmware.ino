@@ -3,61 +3,60 @@
 #include "wifi_manager.h"
 #include "mqtt.h"
 
-// Variáveis globais
+// Estado global
 unsigned long lastMsg = 0;
-bool lastSensorState = false;
+bool lastSensorState = false;   // HIGH = livre, LOW = interrompido (com INPUT_PULLUP)
 bool wifiConnected = false;
 bool mqttConnected = false;
 
-// Contadores para monitoramento
 unsigned long pizzaCount = 0;
 unsigned long mqttReconnectAttempts = 0;
 unsigned long lastWifiCheck = 0;
-const unsigned long WIFI_CHECK_INTERVAL = 30000; // 30 segundos
+const unsigned long WIFI_CHECK_INTERVAL = 30000; // 30 s
 
-// Setup
 void setup() {
-    // Serial
     Serial.begin(115200);
     Serial.println();
     Serial.println("==========================================");
     Serial.println("    SISTEMA DE CONTAGEM TERELINA");
     Serial.println("==========================================");
     Serial.println();
-    
-    // Sensor
-    pinMode(SENSOR_PIN, INPUT);
-    Serial.printf("Sensor configurado no pino GPIO %d\n", SENSOR_PIN);
-    
+
+    // Sensor (pull-up interno; HIGH=livre, LOW=interrompido)
+    pinMode(SENSOR_PIN, INPUT_PULLUP);
+    Serial.printf("Sensor configurado no GPIO %d (INPUT_PULLUP)\n", SENSOR_PIN);
+
+    // Sincroniza estado inicial para evitar transição falsa no boot
+    lastSensorState = (digitalRead(SENSOR_PIN) == HIGH);
+
     // WiFi
     Serial.println("Iniciando conexão WiFi...");
     setup_wifi();
     wifiConnected = true;
     Serial.printf("WiFi conectado! IP: %s\n", WiFi.localIP().toString().c_str());
-    
+
     // MQTT
     Serial.println("Configurando cliente MQTT...");
-    client.setServer(mqtt_server, mqtt_port);
+    mqtt_init(); // define servidor, buffer, keepalive, etc.
     Serial.printf("MQTT configurado para: %s:%d\n", mqtt_server, mqtt_port);
-    
+
     // Conexão inicial MQTT
     reconnect_mqtt();
-    
+
     Serial.println("Sistema inicializado com sucesso!");
     Serial.println("==========================================");
     Serial.println();
 }
 
-// Loop principal
 void loop() {
     unsigned long now = millis();
-    
+
     // Verifica WiFi periodicamente
     if (now - lastWifiCheck > WIFI_CHECK_INTERVAL) {
         check_wifi_connection();
         lastWifiCheck = now;
     }
-    
+
     // Gerencia MQTT
     if (!client.connected()) {
         mqttConnected = false;
@@ -65,37 +64,50 @@ void loop() {
     } else {
         mqttConnected = true;
     }
-    
+
     // Processa MQTT
     mqtt_loop();
-    
-    // Lê sensor
-    bool currentSensorState = (digitalRead(SENSOR_PIN) == HIGH);
-    
-    // Detecta mudança de estado
-    if (currentSensorState != lastSensorState) {
-        Serial.printf("Mudança de estado do sensor: %s -> %s\n", 
-                     lastSensorState ? "LIVRE" : "INTERROMPIDA",
-                     currentSensorState ? "LIVRE" : "INTERROMPIDA");
-        
-        // Publica estado via MQTT
-        if (mqttConnected) {
-            publish_sensor_state(currentSensorState);
-            
-            // Conta pizza (interrompida -> livre)
-            if (!lastSensorState && currentSensorState) {
-                pizzaCount++;
-                Serial.printf("PIZZA DETECTADA! Total: %lu\n", pizzaCount);
-            }
-        } else {
-            Serial.println("MQTT desconectado - não foi possível publicar estado");
-        }
-        
-        lastSensorState = currentSensorState;
-        delay(SENSOR_DEBOUNCE_DELAY);
+
+    // Lê sensor (HIGH=livre, LOW=interrompido)
+    int raw = digitalRead(SENSOR_PIN);
+    bool currentSensorState = (raw == HIGH);
+
+    // Debug do pino bruto (a cada ~500 ms)
+    static unsigned long lastDbg = 0;
+    if (now - lastDbg > 500) {
+        lastDbg = now;
+        Serial.printf("[DBG] raw=%d  interpretado=%s\n",
+                      raw, currentSensorState ? "LIVRE" : "INTERROMPIDO");
     }
-    
-    // Heartbeat periódico
+
+    // Detecta mudança com debounce em micros (não bloqueante)
+    static unsigned long lastChangeUs = 0;
+    if (currentSensorState != lastSensorState) {
+        unsigned long nowUs = micros();
+        if (nowUs - lastChangeUs >= (SENSOR_DEBOUNCE_DELAY * 1000UL)) {
+            lastChangeUs = nowUs;
+
+            Serial.printf("Mudança de estado do sensor: %s -> %s\n",
+                          lastSensorState ? "LIVRE" : "INTERROMPIDO",
+                          currentSensorState ? "LIVRE" : "INTERROMPIDO");
+
+            if (mqttConnected) {
+                publish_sensor_state(currentSensorState);
+
+                // Conta pizza (transição interrompido -> livre)
+                if (!lastSensorState && currentSensorState) {
+                    pizzaCount++;
+                    Serial.printf("PIZZA DETECTADA! Total: %lu\n", pizzaCount);
+                }
+            } else {
+                Serial.println("MQTT desconectado - não foi possível publicar estado");
+            }
+
+            lastSensorState = currentSensorState;
+        }
+    }
+
+    // Heartbeat
     if (now - lastMsg > HEARTBEAT_INTERVAL) {
         lastMsg = now;
         if (mqttConnected) {
@@ -105,12 +117,12 @@ void loop() {
             Serial.println("Heartbeat não enviado - MQTT desconectado");
         }
     }
-    
-    // Delay curto para estabilidade
-    delay(10);
+
+    // Evitar travas longas no loop
+    delay(1);
 }
 
-// Funções auxiliares
+// WiFi helpers
 void check_wifi_connection() {
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("Conexão WiFi perdida! Tentando reconectar...");
@@ -121,14 +133,13 @@ void check_wifi_connection() {
     }
 }
 
-// Debug (opcional)
 void print_system_status() {
     Serial.println("\n=== STATUS DO SISTEMA ===");
     Serial.printf("WiFi: %s\n", wifiConnected ? "Conectado" : "Desconectado");
     Serial.printf("MQTT: %s\n", mqttConnected ? "Conectado" : "Desconectado");
-    Serial.printf("Sensor: %s\n", lastSensorState ? "LIVRE" : "INTERROMPIDA");
+    Serial.printf("Sensor: %s\n", lastSensorState ? "LIVRE" : "INTERROMPIDO");
     Serial.printf("Pizzas contadas: %lu\n", pizzaCount);
     Serial.printf("Tentativas MQTT: %lu\n", mqttReconnectAttempts);
-    Serial.printf("Uptime: %lu segundos\n", millis() / 1000);
+    Serial.printf("Uptime: %lu s\n", millis() / 1000);
     Serial.println("========================\n");
 }

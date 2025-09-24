@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 # Carregar variáveis de ambiente do arquivo .env
 load_dotenv()
 
-# Configurações do banco de dados (as mesmas do seu main.py)
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_NAME = os.getenv("DB_NAME", "terelina_db")
 DB_USER = os.getenv("DB_USER", "postgres")
@@ -26,17 +25,22 @@ def populate_db():
         )
         cursor = conn.cursor()
 
-        print("Populando o banco de dados com 300 registros de teste...")
-        base_timestamp = datetime.now() - timedelta(days=30) # Inicia 30 dias atrás
+        print("Populando o banco de dados com dados simulados para 3 meses (08h-18h)...")
 
-        for i in range(300):
-            # Cria um timestamp aleatório dentro de uma janela de tempo
-            random_hours = random.randint(0, 23)
-            random_minutes = random.randint(0, 59)
-            random_seconds = random.randint(0, 59)
-            timestamp = base_timestamp + timedelta(days=i // 10, hours=random_hours, minutes=random_minutes, seconds=random_seconds)
+        base_timestamp = datetime.now() - timedelta(days=90)  # 3 meses atrás
 
-            cursor.execute("INSERT INTO contagens_pizzas (timestamp) VALUES (%s)", (timestamp,))
+        for day_offset in range(90):  # para cada dia
+            # Número aleatório de registros por dia (ex: entre 50 e 150)
+            registros_hoje = random.randint(50, 150)
+
+            for _ in range(registros_hoje):
+                # Hora aleatória entre 08 e 18
+                random_hours = random.randint(8, 17)  # 17 porque o minuto/segundo pode chegar até 59
+                random_minutes = random.randint(0, 59)
+                random_seconds = random.randint(0, 59)
+
+                timestamp = base_timestamp + timedelta(days=day_offset, hours=random_hours, minutes=random_minutes, seconds=random_seconds)
+                cursor.execute("INSERT INTO contagens_pizzas (timestamp) VALUES (%s)", (timestamp,))
         
         conn.commit()
         cursor.close()

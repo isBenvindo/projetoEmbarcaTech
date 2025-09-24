@@ -1,41 +1,72 @@
 #include "wifi_manager.h"
 #include "config.h"
 #include <Arduino.h>
-#include <WiFi.h> 
+#include <WiFi.h>
 
 // Constantes
-const unsigned long WIFI_TIMEOUT = 30000; // timeout WiFi
-const unsigned long WIFI_RETRY_DELAY = 5000; // delay entre tentativas
-const int MAX_WIFI_ATTEMPTS = 10; // tentativas máximas
+const unsigned long WIFI_TIMEOUT = 30000;      // timeout WiFi
+const unsigned long WIFI_RETRY_DELAY = 5000;   // delay entre tentativas
+const int MAX_WIFI_ATTEMPTS = 10;              // tentativas máximas
 
 // Variáveis globais
 unsigned long wifiStartTime = 0;
 int wifiAttempts = 0;
 
+// ---------------------------------------------------------------------
+// Handlers de eventos (compatível com Arduino-ESP32 core 3.x)
+// ---------------------------------------------------------------------
+static void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+    switch (event) {
+        case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+            // campo mudou para wifi_sta_connected
+            Serial.printf("[WiFi] Associado ao AP (canal %d)\n",
+                          (int)info.wifi_sta_connected.channel);
+            break;
+
+        case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+            // campo mudou para wifi_sta_disconnected
+            Serial.printf("[WiFi] Desconectado. Motivo=%d\n",
+                          (int)info.wifi_sta_disconnected.reason);
+            break;
+
+        case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+            Serial.printf("[WiFi] IP obtido: %s\n",
+                          WiFi.localIP().toString().c_str());
+            break;
+
+        default:
+            // outros eventos ignorados
+            break;
+    }
+}
+
+// ---------------------------------------------------------------------
 // Configuração WiFi
+// ---------------------------------------------------------------------
 void setup_wifi() {
     wifiAttempts = 0;
     wifiStartTime = millis();
-    
+
     Serial.println();
     Serial.println("Iniciando conexão WiFi...");
     Serial.printf("Rede: %s\n", ssid);
-    
-    // Modo WiFi
+
+    // Registra handler de eventos ANTES de iniciar a conexão
+    WiFi.onEvent(onWifiEvent);
+
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
-    
-    // Aguarda conexão com timeout
+
+    // Aguarda conexão com timeout e re-tentativas
     while (WiFi.status() != WL_CONNECTED) {
         delay(500);
         Serial.print(".");
-        
-        // Timeout
+
         if (millis() - wifiStartTime > WIFI_TIMEOUT) {
             Serial.println();
             Serial.println("Timeout na conexão WiFi!");
             Serial.println("Reiniciando tentativa...");
-            
+
             wifiAttempts++;
             if (wifiAttempts >= MAX_WIFI_ATTEMPTS) {
                 Serial.println("Máximo de tentativas WiFi atingido!");
@@ -43,15 +74,14 @@ void setup_wifi() {
                 delay(10000);
                 ESP.restart();
             }
-            
-            // Reinicia
-            WiFi.disconnect();
+
+            WiFi.disconnect(true, true); // força re-scan no core 3.x
             delay(WIFI_RETRY_DELAY);
             wifiStartTime = millis();
             WiFi.begin(ssid, password);
         }
     }
-    
+
     Serial.println();
     Serial.println("WiFi conectado com sucesso!");
     Serial.printf("Endereço IP: %s\n", WiFi.localIP().toString().c_str());
@@ -68,7 +98,7 @@ bool is_wifi_connected() {
 // Reconecta WiFi
 void reconnect_wifi() {
     Serial.println("Reconectando WiFi...");
-    WiFi.disconnect();
+    WiFi.disconnect(true, true);
     delay(1000);
     setup_wifi();
 }
@@ -91,15 +121,14 @@ void print_wifi_info() {
 void monitor_wifi() {
     static unsigned long lastCheck = 0;
     const unsigned long CHECK_INTERVAL = 30000; // 30 segundos
-    
+
     if (millis() - lastCheck > CHECK_INTERVAL) {
         lastCheck = millis();
-        
+
         if (WiFi.status() != WL_CONNECTED) {
             Serial.println("Conexão WiFi perdida! Tentando reconectar...");
             reconnect_wifi();
         } else {
-            // Log periódico (opcional)
             Serial.printf("WiFi OK - RSSI: %d dBm\n", WiFi.RSSI());
         }
     }

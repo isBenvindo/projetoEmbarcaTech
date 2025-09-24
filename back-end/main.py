@@ -4,14 +4,13 @@ from fastapi.responses import JSONResponse
 import psycopg2
 from psycopg2 import Error
 import os
-import time
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from mqtt_client import start_mqtt_client
+from mqtt_client import start_mqtt_client, get_mqtt_status  # << adição
 
 # Carregar variáveis de ambiente
 load_dotenv()
@@ -88,12 +87,13 @@ def get_db_connection():
             password=DB_PASSWORD,
             port=DB_PORT
         )
-        logger.info("Conexão com PostgreSQL estabelecida com sucesso")
+        # era INFO — passa a DEBUG para não poluir logs em produção
+        logger.debug("Conexão com PostgreSQL estabelecida com sucesso")
         return conn
     except Error as e:
         logger.error(f"Erro ao conectar ao PostgreSQL: {e}")
         raise HTTPException(
-            status_code=500, 
+            status_code=500,
             detail=f"Erro interno do servidor ao conectar ao DB: {e}"
         )
 
@@ -129,7 +129,7 @@ async def startup_event():
     global mqtt_client_instance
     logger.info("Iniciando aplicação FastAPI e cliente MQTT...")
     log_system_event("INFO", "Aplicação FastAPI iniciada", "backend")
-    
+
     try:
         mqtt_client_instance = start_mqtt_client(get_db_connection)
         logger.info("Cliente MQTT iniciado com sucesso")
@@ -145,7 +145,7 @@ async def shutdown_event():
     global mqtt_client_instance
     logger.info("Encerrando aplicação FastAPI e cliente MQTT...")
     log_system_event("INFO", "Aplicação FastAPI encerrada", "backend")
-    
+
     if mqtt_client_instance:
         try:
             mqtt_client_instance.loop_stop()
@@ -181,7 +181,7 @@ async def health_check():
         message = f"Aplicação funcionando normalmente - PostgreSQL {version[0]}"
     except Exception as e:
         message = f"Problema na conexão com banco: {str(e)}"
-    
+
     return HealthResponse(
         status="healthy" if db_connected else "unhealthy",
         message=message,
@@ -199,7 +199,7 @@ async def test_db_connection():
         cursor.execute("SELECT version();")
         version = cursor.fetchone()
         cursor.close()
-        
+
         return HealthResponse(
             status="success",
             message=f"Conexão com o PostgreSQL estabelecida com sucesso! Versão: {version[0]}",
@@ -230,29 +230,29 @@ async def get_contagens(limit: int = 100, offset: int = 0):
     """Retorna lista de contagens de pizzas"""
     if limit > 1000:
         raise HTTPException(status_code=400, detail="Limite máximo é 1000 registros")
-    
+
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         # Paginação
         cursor.execute(
             "SELECT id, timestamp FROM contagens_pizzas ORDER BY timestamp DESC LIMIT %s OFFSET %s",
             (limit, offset)
         )
         results = cursor.fetchall()
-        
+
         contagens_list = []
         for row in results:
             contagens_list.append(ContagemResponse(
                 id=row[0],
                 timestamp=row[1].isoformat()
             ))
-        
+
         logger.info(f"Retornadas {len(contagens_list)} contagens")
         return contagens_list
-        
+
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -269,31 +269,31 @@ async def get_estatisticas():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         # Total de contagens
         cursor.execute("SELECT COUNT(*) FROM contagens_pizzas")
         total_contagens = cursor.fetchone()[0]
-        
+
         # Contagens hoje
         cursor.execute(
             "SELECT COUNT(*) FROM contagens_pizzas WHERE DATE(timestamp) = CURRENT_DATE"
         )
         contagens_hoje = cursor.fetchone()[0]
-        
+
         # Última contagem
         cursor.execute(
             "SELECT timestamp FROM contagens_pizzas ORDER BY timestamp DESC LIMIT 1"
         )
         ultima_contagem = cursor.fetchone()
         ultima_contagem = ultima_contagem[0].isoformat() if ultima_contagem else None
-        
+
         return EstatisticasResponse(
             total_contagens=total_contagens,
             contagens_hoje=contagens_hoje,
             ultima_contagem=ultima_contagem,
             timestamp_consulta=datetime.now().isoformat()
         )
-        
+
     except Exception as e:
         logger.error(f"Erro ao buscar estatísticas: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao buscar estatísticas: {str(e)}")
@@ -302,7 +302,6 @@ async def get_estatisticas():
             conn.close()
 
 # Grafana: endpoints
-
 @app.get("/grafana/contagens-por-hora")
 async def get_contagens_por_hora():
     """Endpoint para Grafana - Contagens por hora"""
@@ -310,7 +309,7 @@ async def get_contagens_por_hora():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute("""
             SELECT 
                 EXTRACT(EPOCH FROM hora) as timestamp_unix,
@@ -319,18 +318,18 @@ async def get_contagens_por_hora():
             WHERE hora >= CURRENT_DATE - INTERVAL '7 days'
             ORDER BY hora
         """)
-        
+
         results = cursor.fetchall()
-        
+
         datapoints = []
         for row in results:
             datapoints.append([row[1], row[0] * 1000])  # Grafana espera timestamp em ms
-        
+
         return [{
             "target": "Pizzas por Hora",
             "datapoints": datapoints
         }]
-        
+
     except Exception as e:
         logger.error(f"Erro ao buscar contagens por hora: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao buscar contagens por hora: {str(e)}")
@@ -345,7 +344,7 @@ async def get_contagens_por_dia():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute("""
             SELECT 
                 EXTRACT(EPOCH FROM data) as timestamp_unix,
@@ -354,18 +353,18 @@ async def get_contagens_por_dia():
             WHERE data >= CURRENT_DATE - INTERVAL '30 days'
             ORDER BY data
         """)
-        
+
         results = cursor.fetchall()
-        
+
         datapoints = []
         for row in results:
             datapoints.append([row[1], row[0] * 1000])  # Grafana espera timestamp em ms
-        
+
         return [{
             "target": "Pizzas por Dia",
             "datapoints": datapoints
         }]
-        
+
     except Exception as e:
         logger.error(f"Erro ao buscar contagens por dia: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao buscar contagens por dia: {str(e)}")
@@ -380,7 +379,7 @@ async def get_velocidade_producao():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute("""
             SELECT 
                 EXTRACT(EPOCH FROM hora) as timestamp_unix,
@@ -388,18 +387,18 @@ async def get_velocidade_producao():
             FROM velocidade_producao 
             ORDER BY hora
         """)
-        
+
         results = cursor.fetchall()
-        
+
         datapoints = []
         for row in results:
             datapoints.append([row[1], row[0] * 1000])  # Grafana espera timestamp em ms
-        
+
         return [{
             "target": "Velocidade de Produção (pizzas/hora)",
             "datapoints": datapoints
         }]
-        
+
     except Exception as e:
         logger.error(f"Erro ao buscar velocidade de produção: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao buscar velocidade de produção: {str(e)}")
@@ -414,10 +413,10 @@ async def get_estatisticas_hoje():
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute("SELECT * FROM estatisticas_hoje")
         result = cursor.fetchone()
-        
+
         if result:
             return {
                 "total_contagens": result[0],
@@ -434,7 +433,7 @@ async def get_estatisticas_hoje():
                 "data": datetime.now().date().isoformat(),
                 "timestamp_unix": int(datetime.now().timestamp() * 1000)
             }
-        
+
     except Exception as e:
         logger.error(f"Erro ao buscar estatísticas do dia: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao buscar estatísticas do dia: {str(e)}")
@@ -449,7 +448,7 @@ async def get_ultimas_contagens(limit: int = Query(100, le=1000)):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         cursor.execute("""
             SELECT 
                 EXTRACT(EPOCH FROM timestamp) as timestamp_unix,
@@ -459,18 +458,18 @@ async def get_ultimas_contagens(limit: int = Query(100, le=1000)):
             ORDER BY timestamp DESC 
             LIMIT %s
         """, (limit,))
-        
+
         results = cursor.fetchall()
-        
+
         datapoints = []
         for row in results:
             datapoints.append([row[1], row[0] * 1000])  # Grafana espera timestamp em ms
-        
+
         return [{
             "target": "Contagens em Tempo Real",
             "datapoints": datapoints
         }]
-        
+
     except Exception as e:
         logger.error(f"Erro ao buscar últimas contagens: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao buscar últimas contagens: {str(e)}")
@@ -483,41 +482,16 @@ async def get_grafana_metrics():
     """Endpoint para listar métricas disponíveis no Grafana"""
     return {
         "metrics": [
-            {
-                "name": "contagens-por-hora",
-                "description": "Contagens de pizzas agrupadas por hora",
-                "type": "time_series",
-                "url": "/grafana/contagens-por-hora"
-            },
-            {
-                "name": "contagens-por-dia", 
-                "description": "Contagens de pizzas agrupadas por dia",
-                "type": "time_series",
-                "url": "/grafana/contagens-por-dia"
-            },
-            {
-                "name": "velocidade-producao",
-                "description": "Velocidade de produção em pizzas por hora",
-                "type": "time_series", 
-                "url": "/grafana/velocidade-producao"
-            },
-            {
-                "name": "estatisticas-hoje",
-                "description": "Estatísticas do dia atual",
-                "type": "single_stat",
-                "url": "/grafana/estatisticas-hoje"
-            },
-            {
-                "name": "ultimas-contagens",
-                "description": "Últimas contagens em tempo real",
-                "type": "time_series",
-                "url": "/grafana/ultimas-contagens"
-            }
+            {"name": "contagens-por-hora", "description": "Contagens de pizzas agrupadas por hora", "type": "time_series", "url": "/grafana/contagens-por-hora"},
+            {"name": "contagens-por-dia",  "description": "Contagens de pizzas agrupadas por dia",  "type": "time_series", "url": "/grafana/contagens-por-dia"},
+            {"name": "velocidade-producao","description": "Velocidade de produção em pizzas por hora","type": "time_series", "url": "/grafana/velocidade-producao"},
+            {"name": "estatisticas-hoje",  "description": "Estatísticas do dia atual",              "type": "single_stat", "url": "/grafana/estatisticas-hoje"},
+            {"name": "ultimas-contagens",  "description": "Últimas contagens em tempo real",         "type": "time_series", "url": "/grafana/ultimas-contagens"},
         ],
         "database": "PostgreSQL",
         "views_available": [
             "contagens_por_hora",
-            "contagens_por_dia", 
+            "contagens_por_dia",
             "estatisticas_hoje",
             "velocidade_producao",
             "ultimas_contagens_24h"
@@ -529,12 +503,12 @@ async def get_logs(limit: int = 100, nivel: str = None):
     """Retorna logs do sistema"""
     if limit > 500:
         raise HTTPException(status_code=400, detail="Limite máximo é 500 registros")
-    
+
     conn = None
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
         if nivel:
             cursor.execute(
                 "SELECT nivel, mensagem, origem, timestamp FROM logs_sistema WHERE nivel = %s ORDER BY timestamp DESC LIMIT %s",
@@ -545,9 +519,9 @@ async def get_logs(limit: int = 100, nivel: str = None):
                 "SELECT nivel, mensagem, origem, timestamp FROM logs_sistema ORDER BY timestamp DESC LIMIT %s",
                 (limit,)
             )
-        
+
         results = cursor.fetchall()
-        
+
         logs_list = []
         for row in results:
             logs_list.append({
@@ -556,15 +530,24 @@ async def get_logs(limit: int = 100, nivel: str = None):
                 "origem": row[2],
                 "timestamp": row[3].isoformat()
             })
-        
+
         return logs_list
-        
+
     except Exception as e:
         logger.error(f"Erro ao buscar logs: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao buscar logs: {str(e)}")
     finally:
         if conn:
             conn.close()
+
+@app.get("/mqtt/status")  # << adição útil para observabilidade
+async def mqtt_status():
+    """Retorna o status do cliente MQTT e último estado por dispositivo"""
+    try:
+        return get_mqtt_status()
+    except Exception as e:
+        logger.error(f"Erro ao obter status do MQTT: {e}")
+        raise HTTPException(status_code=500, detail="Não foi possível obter o status do MQTT")
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

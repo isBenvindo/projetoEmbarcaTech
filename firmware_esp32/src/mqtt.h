@@ -5,16 +5,19 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 
-// Variáveis externas
+// Instância global do cliente MQTT (declarada em mqtt.cpp)
 extern PubSubClient client;
 
-// Funções principais
+// ===== Setup / ciclo =====
+void mqtt_init();                 // NOVO: setServer, buffer, keepalive, etc.
 void reconnect_mqtt();
-void publish_sensor_state(bool is_free);
 void mqtt_loop();
 
-// Funções auxiliares
+// ===== Publicações =====
+void publish_sensor_state(bool is_free);
 void publish_device_info();
+
+// ===== Status / debug =====
 bool is_mqtt_connected();
 void print_mqtt_stats();
 
