@@ -14,7 +14,6 @@ Sistema IoT para contagem automática de pizzas na Terelina, composto por um sen
 
 ```
 [Sensor Óptico] → [ESP32] → [MQTT Broker] → [FastAPI Backend] → [PostgreSQL] → [Grafana]
-
 ````
 
 ### Componentes
@@ -35,7 +34,7 @@ Sistema IoT para contagem automática de pizzas na Terelina, composto por um sen
 - PostgreSQL (com tabela `contagens_pizzas` existente)  
 - PlatformIO (para firmware ESP32)  
 - ESP32 DevKit  
-- Grafana (opcional, para dashboards)  
+- Grafana (para dashboards)  
 
 ### Backend
 
@@ -87,7 +86,7 @@ cd firmware_esp32
 pio run --target upload
 ```
 
-### Grafana (Opcional)
+### Grafana
 
 Consulte o guia completo: [GRAFANA_SETUP.md](GRAFANA_SETUP.md)
 
@@ -136,7 +135,7 @@ Consulte o guia completo: [GRAFANA_SETUP.md](GRAFANA_SETUP.md)
 ### Configurações ESP32
 
 * WiFi SSID e senha
-* Pino do sensor (padrão: 15)
+* Pino do sensor
 * Configurações MQTT
 
 ---

@@ -7,14 +7,11 @@
 * **Python 3.8+** - [Download Python](https://www.python.org/downloads/)
 * **PostgreSQL 12+** - [Download PostgreSQL](https://www.postgresql.org/download/)
 * **PlatformIO** - Para desenvolvimento do firmware ESP32
-* **Git** - Para clonar o repositório
 
 ### Hardware Necessário
 
 * **ESP32 DevKit** (qualquer versão)
 * **Sensor de barreira óptica** (IR ou laser)
-* **Cabo USB** para ESP32
-* **Cabo de rede** (ou Wi-Fi) para conexão com banco de dados
 
 ---
 
@@ -23,7 +20,7 @@
 ### 1. Clonar o Repositório
 
 ```bash
-git clone <url-do-repositorio>
+git clone <https://github.com/FayrosSky/Projeto-Terelina>
 cd projeto-terelina
 ```
 
@@ -76,7 +73,6 @@ psql -U terelina_user -d terelina_db -h localhost
 #### 3.1 Instalar Dependências Python
 
 ```bash
-cd back-end
 pip install -r requirements.txt
 ```
 
@@ -186,7 +182,6 @@ pio device monitor
 
 #### 5.2 Posicionamento do Sensor
 
-* Instalar sensor de barreira na linha de produção
 * Alinhar emissor e receptor
 * Testar detecção de objetos
 
@@ -281,7 +276,7 @@ psql -U terelina_user -d terelina_db -c "SELECT * FROM logs_sistema ORDER BY tim
 #### Backend reinicia em loop
 
 * Verifique se `RELOAD=true` está habilitado no `.env`
-* Solução: defina `RELOAD=false` ou use `python start_server.py`
+* Solução: defina `RELOAD=false`
 
 ---
 
