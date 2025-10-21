@@ -1,0 +1,54 @@
+services:
+  db:
+    image: postgres:17
+    container_name: terelina_db
+    environment:
+      POSTGRES_DB: terelina_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # aplica o schema na primeira subida do banco
+      - ./back-end/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+    ports:
+      - "5432:5432"   # deixe aberto só se precisar acessar fora do Docker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d terelina_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    container_name: terelina_backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      # Banco
+      DB_HOST: db
+      DB_NAME: terelina_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_PORT: "5432"
+      # App
+      HOST: 0.0.0.0
+      PORT: "8000"
+      LOG_LEVEL: INFO
+      # MQTT (usa HiveMQ público)
+      MQTT_BROKER_HOST: broker.hivemq.com
+      MQTT_BROKER_PORT: "1883"
+      MQTT_TOPIC_STATE: sensores/barreira/estado
+      MQTT_CLIENT_ID: terelina_backend
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    # se quiser ver/logar arquivos fora do container:
+    # volumes:
+    #   - ./back-end/terelina_backend.log:/app/terelina_backend.log
+
+volumes:
+  pgdata:
