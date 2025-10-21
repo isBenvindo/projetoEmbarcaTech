@@ -1,315 +1,282 @@
 # Guia de Instalação - Sistema Terelina
 
-## Pré-requisitos
+## 0. Execução Rápida
 
-### Software Necessário
+Se já possui o **Docker** instalado, siga apenas estes passos:
 
-* **Python 3.8+** - [Download Python](https://www.python.org/downloads/)
-* **PostgreSQL 12+** - [Download PostgreSQL](https://www.postgresql.org/download/)
-* **PlatformIO** - Para desenvolvimento do firmware ESP32
+```bash
+# Clonar o repositório
+git clone https://github.com/FayrosSky/Projeto-Terelina.git
+cd Projeto-Terelina
 
-### Hardware Necessário
+# Subir os containers (banco + backend)
+docker compose up --build -d
 
-* **ESP32 DevKit** (qualquer versão)
-* **Sensor de barreira óptica** (IR ou laser)
+# Verificar status
+docker ps
+
+# Testar API
+curl http://localhost:8000/health
+```
+
+Para encerrar os serviços:
+
+```bash
+docker compose down
+```
+
+Pronto — o sistema estará em execução no endereço `http://localhost:8000`.
 
 ---
 
-## Instalação Passo a Passo
+## 1. Visão Geral
 
-### 1. Clonar o Repositório
+O sistema **Terelina** é composto por:
+
+* Um backend desenvolvido em **FastAPI**, responsável pelo processamento das contagens;
+* Um banco de dados **PostgreSQL**, utilizado para armazenamento;
+* Um firmware para **ESP32**, responsável pela leitura do sensor de barreira óptica;
+* Um painel de visualização opcional em **Grafana**.
+
+A instalação pode ser feita de duas formas:
+
+1. **Via Docker (recomendada)** – configuração automática e reprodutível.
+2. **Manual (modo avançado)** – configuração tradicional e manual.
+
+---
+
+## 2. Instalação via Docker (Recomendada)
+
+### 2.1 Pré-requisitos
+
+* [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+* [Git](https://git-scm.com/downloads)
+
+---
+
+### 2.2 Clonar o Repositório
 
 ```bash
-git clone <https://github.com/FayrosSky/Projeto-Terelina>
-cd projeto-terelina
+git clone https://github.com/FayrosSky/Projeto-Terelina.git
+cd Projeto-Terelina
 ```
 
 ---
 
-### 2. Configurar Banco de Dados PostgreSQL
+### 2.3 Subir o Sistema
 
-#### 2.1 Instalar PostgreSQL
-
-* **Windows**: Baixar e instalar do site oficial
-* **Linux**: `sudo apt-get install postgresql postgresql-contrib`
-* **macOS**: `brew install postgresql`
-
-#### 2.2 Criar Banco de Dados
+O projeto contém os arquivos `Dockerfile` e `docker-compose.yml` configurados.
 
 ```bash
-# Conectar ao PostgreSQL
-sudo -u postgres psql
+docker compose up --build -d
+```
 
-# Criar banco e usuário
+Isso inicia automaticamente:
+
+* **PostgreSQL** (`terelina_db`)
+* **Backend FastAPI** (`terelina_backend`)
+
+---
+
+### 2.4 Verificar Containers
+
+```bash
+docker ps
+```
+
+Saída esperada:
+
+| CONTAINER NAME   | STATUS       | PORTS        |
+| ---------------- | ------------ | ------------ |
+| terelina_backend | Up (healthy) | 0.0.0.0:8000 |
+| terelina_db      | Up (healthy) | 0.0.0.0:5432 |
+
+---
+
+### 2.5 Testar Conexão
+
+```bash
+curl http://localhost:8000/health
+```
+
+Saída esperada:
+
+```json
+{"status": "ok"}
+```
+
+---
+
+### 2.6 Acessar o Banco de Dados
+
+```bash
+docker exec -it terelina_db psql -U postgres -d terelina_db
+```
+
+Exemplo de consulta:
+
+```sql
+SELECT * FROM contagens_pizzas ORDER BY timestamp DESC LIMIT 10;
+```
+
+---
+
+### 2.7 Encerrar o Sistema
+
+```bash
+docker compose down
+```
+
+---
+
+## 3. Instalação Manual (Modo Avançado)
+
+> Use este modo apenas se preferir não utilizar Docker.
+
+### 3.1 Requisitos
+
+* **Python 3.8+**
+* **PostgreSQL 12+**
+* **PlatformIO** (para desenvolvimento do firmware ESP32)
+
+---
+
+### 3.2 Banco de Dados PostgreSQL
+
+Conecte-se ao PostgreSQL e execute:
+
+```sql
 CREATE DATABASE terelina_db;
 CREATE USER terelina_user WITH PASSWORD 'sua_senha_aqui';
 GRANT ALL PRIVILEGES ON DATABASE terelina_db TO terelina_user;
-\q
-```
 
-#### 2.3 Criar Tabela Principal
-
-```sql
 CREATE TABLE IF NOT EXISTS contagens_pizzas (
     id SERIAL PRIMARY KEY,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
 
-#### 2.4 Executar Schema Auxiliar
-
-```bash
-# Conectar ao banco criado
-psql -U terelina_user -d terelina_db -h localhost
-
-# Executar o schema com views auxiliares
-\i back-end/schema.sql
-```
-
 ---
 
-### 3. Configurar Backend
-
-#### 3.1 Instalar Dependências Python
+### 3.3 Configuração do Backend
 
 ```bash
 pip install -r requirements.txt
-```
-
-#### 3.2 Configurar Variáveis de Ambiente
-
-```bash
-# Copiar arquivo de exemplo
 cp env.example .env
-
-# Editar arquivo .env com suas configurações
 nano .env
 ```
 
-**Exemplo de configuração `.env`:**
+Exemplo de configuração `.env`:
 
 ```env
-# Configurações do Banco de Dados PostgreSQL
 DB_HOST=localhost
 DB_NAME=terelina_db
 DB_USER=terelina_user
 DB_PASSWORD=sua_senha_aqui
 DB_PORT=5432
-
-# Configurações MQTT
-MQTT_BROKER_HOST=broker.hivemq.com
-MQTT_BROKER_PORT=1883
-MQTT_TOPIC_STATE=sensores/barreira/estado
-MQTT_USERNAME=
-MQTT_PASSWORD=
-MQTT_CLIENT_ID=terelina_backend
-
-# Configurações da Aplicação
 HOST=0.0.0.0
 PORT=8000
 LOG_LEVEL=INFO
-RELOAD=false
 ```
-
-#### 3.3 Executar Backend
-
-```bash
-# Usar script de inicialização (recomendado)
-python start_server.py
-
-# Ou em desenvolvimento, com hot reload
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-**Atenção**: Use `--reload` apenas em desenvolvimento.
-Em produção, mantenha `RELOAD=false` no `.env`.
 
 ---
 
-### 4. Configurar Firmware ESP32
-
-#### 4.1 Instalar PlatformIO
+### 3.4 Executar Servidor
 
 ```bash
-# Via pip
-pip install platformio
-
-# Ou via VS Code extension
-# Instalar extensão "PlatformIO IDE"
+uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-#### 4.2 Configurar WiFi e MQTT
+---
 
-Editar arquivo `firmware_esp32/src/config.cpp`:
+## 4. Firmware ESP32
+
+### 4.1 Configurar Wi-Fi e MQTT
+
+Arquivo: `firmware_esp32/src/config.cpp`
 
 ```cpp
-// Configurações de rede WiFi
 const char* ssid = "SUA_REDE_WIFI";
 const char* password = "SUA_SENHA_WIFI";
-
-// Configurações MQTT (manter padrão para HiveMQ)
 const char* mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
-
-// GPIO do sensor (padrão: 15, pode ser alterado)
 const int sensor_pin = 15;
 ```
 
-#### 4.3 Compilar e Fazer Upload
+---
+
+### 4.2 Compilar e Enviar
 
 ```bash
 cd firmware_esp32
-
-# Compilar
 pio run
-
-# Fazer upload para ESP32
 pio run --target upload
-
-# Monitorar serial
 pio device monitor
 ```
 
 ---
 
-### 5. Conectar Hardware
+## 5. Monitoramento com Grafana (Opcional)
 
-#### 5.1 Conexões ESP32
+Para visualizar as contagens em tempo real:
 
-* **VCC** do sensor → **3.3V** do ESP32
-* **GND** do sensor → **GND** do ESP32
-* **Sinal** do sensor → **GPIO 15** (ou outro configurado)
+1. Acesse o Grafana em `http://localhost:3000`
+2. Adicione uma nova fonte de dados **PostgreSQL**
 
-#### 5.2 Posicionamento do Sensor
+   * Host: `localhost:5432`
+   * Database: `terelina_db`
+   * User: `postgres`
+   * Password: `postgres`
+3. Teste a conexão.
+4. Crie um painel com a consulta:
 
-* Alinhar emissor e receptor
-* Testar detecção de objetos
+```sql
+SELECT COUNT(*) FROM contagens_pizzas;
+```
 
 ---
 
-## Testes
+## 6. Testes do Sistema
 
-### 1. Testar Backend
+### 6.1 Testar API
 
 ```bash
-# Verificar saúde da API
 curl http://localhost:8000/health
-
-# Testar conexão com banco
-curl http://localhost:8000/test_db_connection
-
-# Ver estatísticas
 curl http://localhost:8000/contagens/estatisticas
 ```
 
-### 2. Testar MQTT
+### 6.2 Testar Sensor
 
-```bash
-# Instalar cliente MQTT
-pip install paho-mqtt
-
-# Testar publicação (payload válido)
-python -c "
-import paho.mqtt.publish as publish
-publish.single('sensores/barreira/estado',
-               '{\"id\":\"ESP32_Barreira_001\",\"state\":\"livre\",\"timestamp_ms\":123456}',
-               hostname='broker.hivemq.com')
-"
-```
-
-### 3. Testar Sensor
-
-* Passar objeto pela barreira óptica
-* Verificar logs no ESP32
-* Confirmar recebimento no backend
+* Passe um objeto pela barreira óptica;
+* Observe os logs no ESP32;
+* Confirme a inserção no banco de dados.
 
 ---
 
-## Monitoramento
-
-### Logs do Sistema
+## 7. Atualizações do Sistema
 
 ```bash
-# Ver logs do backend
-tail -f back-end/terelina_backend.log
-
-# Ver logs do banco
-psql -U terelina_user -d terelina_db -c "SELECT * FROM logs_sistema ORDER BY timestamp DESC LIMIT 10;"
-```
-
-### Métricas
-
-* **API**: [http://localhost:8000/docs](http://localhost:8000/docs) (Swagger UI)
-* **Estatísticas**: [http://localhost:8000/contagens/estatisticas](http://localhost:8000/contagens/estatisticas)
-* **Logs**: [http://localhost:8000/logs](http://localhost:8000/logs)
-
----
-
-## Troubleshooting
-
-### Problemas Comuns
-
-#### ESP32 não conecta ao WiFi
-
-* Verificar SSID e senha
-* Verificar distância do roteador
-* Verificar se a rede é 2.4GHz
-
-#### Backend não conecta ao banco
-
-* Verificar se PostgreSQL está rodando
-* Verificar credenciais no `.env`
-* Verificar se banco existe
-
-#### Dados não chegam via MQTT
-
-* Verificar conexão WiFi do ESP32
-* Verificar se broker está acessível
-* Verificar tópicos MQTT
-
-#### Sensor não detecta
-
-* Verificar conexões elétricas
-* Verificar alinhamento do sensor
-* Verificar tensão de alimentação
-
-#### Backend reinicia em loop
-
-* Verifique se `RELOAD=true` está habilitado no `.env`
-* Solução: defina `RELOAD=false`
-
----
-
-## Atualizações
-
-Para atualizar o sistema:
-
-```bash
-# Atualizar código
 git pull origin main
-
-# Atualizar dependências
-pip install -r requirements.txt
-
-# Recompilar firmware
-cd firmware_esp32
-pio run --target upload
-
-# Reiniciar backend
-python start_server.py
+docker compose down
+docker compose up --build -d
 ```
 
 ---
 
-## Suporte
+## 8. Solução de Problemas
 
-Para problemas ou dúvidas:
-
-1. Verificar logs do sistema
-2. Consultar documentação
+| Problema                      | Causa Provável                  | Solução                             |
+| ----------------------------- | ------------------------------- | ----------------------------------- |
+| Backend não conecta ao banco  | Banco de dados não inicializado | Verificar `docker ps`               |
+| Dados não aparecem no Grafana | Query incorreta                 | Verificar fonte de dados no Grafana |
+| ESP32 não conecta ao Wi-Fi    | Credenciais incorretas          | Revisar `config.cpp`                |
+| Backend reinicia em loop      | `RELOAD=true` no `.env`         | Definir `RELOAD=false`              |
 
 ---
 
-**Sistema Terelina v1.0.0** – Projeto desenvolvido em parceria com a empresa **Terelina** e o programa **EmbarcaTech**.
+## 9. Créditos
+
+**Sistema Terelina v1.0.0**
+Desenvolvido em parceria com a empresa **Terelina** e o programa **EmbarcaTech**.
 
 ---
