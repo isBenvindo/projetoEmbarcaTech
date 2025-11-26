@@ -1,135 +1,110 @@
+/**
+ * @file wifi_manager.cpp
+ * @brief Handles WiFi connectivity using the WiFiManager library.
+ *
+ * Features:
+ * - Captive Portal for on-demand configuration (no hardcoded passwords).
+ * - Automatic reconnection to the last known network.
+ * - Secure fallback to credentials defined in secrets.h if the portal times out.
+ */
+
 #include "wifi_manager.h"
 #include "config.h"
-#include <Arduino.h>
+#include "secrets.h"      // Include the secrets file for fallback credentials
 #include <WiFi.h>
+#include <WiFiManager.h>  // This line requires the "tzapu/WiFiManager" library in platformio.ini
 
-// Constantes
-const unsigned long WIFI_TIMEOUT = 30000;      // timeout WiFi
-const unsigned long WIFI_RETRY_DELAY = 5000;   // delay entre tentativas
-const int MAX_WIFI_ATTEMPTS = 10;              // tentativas máximas
+// =====================================================================
+// Private Event Handler
+// =====================================================================
 
-// Variáveis globais
-unsigned long wifiStartTime = 0;
-int wifiAttempts = 0;
-
-// ---------------------------------------------------------------------
-// Handlers de eventos (compatível com Arduino-ESP32 core 3.x)
-// ---------------------------------------------------------------------
+/**
+ * @brief Captures WiFi events to provide detailed logs for debugging.
+ */
 static void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     switch (event) {
         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
-            // campo mudou para wifi_sta_connected
-            Serial.printf("[WiFi] Associado ao AP (canal %d)\n",
-                          (int)info.wifi_sta_connected.channel);
+            Serial.println(F("[WiFi Event] Station connected to AP."));
             break;
-
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-            // campo mudou para wifi_sta_disconnected
-            Serial.printf("[WiFi] Desconectado. Motivo=%d\n",
-                          (int)info.wifi_sta_disconnected.reason);
+            Serial.print(F("[WiFi Event] Disconnected from AP. Reason: "));
+            Serial.println((int)info.wifi_sta_disconnected.reason);
+            // The ESP32 will automatically try to reconnect. We don't need manual code for this.
             break;
-
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-            Serial.printf("[WiFi] IP obtido: %s\n",
-                          WiFi.localIP().toString().c_str());
+            Serial.print(F("[WiFi Event] IP Address obtained: "));
+            Serial.println(WiFi.localIP());
             break;
-
         default:
-            // outros eventos ignorados
+            // Other events are ignored
             break;
     }
 }
 
-// ---------------------------------------------------------------------
-// Configuração WiFi
-// ---------------------------------------------------------------------
-void setup_wifi() {
-    wifiAttempts = 0;
-    wifiStartTime = millis();
+// =====================================================================
+// Public Functions (defined in wifi_manager.h)
+// =====================================================================
 
-    Serial.println();
-    Serial.println("Iniciando conexão WiFi...");
-    Serial.printf("Rede: %s\n", ssid);
-
-    // Registra handler de eventos ANTES de iniciar a conexão
+void setupWifi() {
+    // Register the event handler for better debugging feedback
     WiFi.onEvent(onWifiEvent);
 
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, password);
+    // Initialize the WiFiManager object
+    WiFiManager wm;
 
-    // Aguarda conexão com timeout e re-tentativas
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
+    // Set a timeout for the configuration portal (in seconds).
+    // If no one configures the device within this time, it will proceed to the fallback.
+    wm.setConfigPortalTimeout(180); // 3 minutes
 
-        if (millis() - wifiStartTime > WIFI_TIMEOUT) {
-            Serial.println();
-            Serial.println("Timeout na conexão WiFi!");
-            Serial.println("Reiniciando tentativa...");
+    // Set the name of the Access Point that will be created if connection fails
+    const char* apName = "Terelina-Config-Portal";
 
-            wifiAttempts++;
-            if (wifiAttempts >= MAX_WIFI_ATTEMPTS) {
-                Serial.println("Máximo de tentativas WiFi atingido!");
-                Serial.println("Reiniciando ESP32 em 10 segundos...");
-                delay(10000);
-                ESP.restart();
-            }
+    Serial.println(F("[WiFi] Starting connection process via WiFiManager..."));
 
-            WiFi.disconnect(true, true); // força re-scan no core 3.x
-            delay(WIFI_RETRY_DELAY);
-            wifiStartTime = millis();
-            WiFi.begin(ssid, password);
+    // wm.autoConnect() is a blocking function with the following logic:
+    // 1. Tries to connect to the last saved WiFi credentials.
+    // 2. If it fails, it starts an Access Point (AP) with the name specified (apName).
+    // 3. It waits for a user to connect to the AP, open the captive portal, and enter new credentials.
+    // 4. Returns 'true' if connected successfully (either way), 'false' if the portal times out.
+    if (!wm.autoConnect(apName)) {
+        Serial.println(F("[WiFi] Portal timed out. Attempting fallback from secrets.h..."));
+        
+        // --- Fallback Logic ---
+        // If the portal times out, try connecting with the credentials from secrets.h
+        WiFi.begin(FALLBACK_WIFI_SSID, FALLBACK_WIFI_PASSWORD);
+        
+        unsigned long startAttemptTime = millis();
+        // Wait for up to 20 seconds for the fallback connection
+        while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 20000) {
+            delay(500);
+            Serial.print(".");
         }
-    }
-
-    Serial.println();
-    Serial.println("WiFi conectado com sucesso!");
-    Serial.printf("Endereço IP: %s\n", WiFi.localIP().toString().c_str());
-    Serial.printf("Força do sinal (RSSI): %d dBm\n", WiFi.RSSI());
-    Serial.printf("Canal: %d\n", WiFi.channel());
-    Serial.printf("Tentativas necessárias: %d\n", wifiAttempts + 1);
-}
-
-// Verifica status WiFi
-bool is_wifi_connected() {
-    return WiFi.status() == WL_CONNECTED;
-}
-
-// Reconecta WiFi
-void reconnect_wifi() {
-    Serial.println("Reconectando WiFi...");
-    WiFi.disconnect(true, true);
-    delay(1000);
-    setup_wifi();
-}
-
-// Informações WiFi
-void print_wifi_info() {
-    Serial.println("\n=== INFORMAÇÕES WIFI ===");
-    Serial.printf("Status: %s\n", WiFi.status() == WL_CONNECTED ? "Conectado" : "Desconectado");
-    Serial.printf("SSID: %s\n", ssid);
-    Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
-    Serial.printf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
-    Serial.printf("DNS: %s\n", WiFi.dnsIP().toString().c_str());
-    Serial.printf("RSSI: %d dBm\n", WiFi.RSSI());
-    Serial.printf("Canal: %d\n", WiFi.channel());
-    Serial.printf("Tentativas: %d\n", wifiAttempts);
-    Serial.println("========================\n");
-}
-
-// Monitora WiFi
-void monitor_wifi() {
-    static unsigned long lastCheck = 0;
-    const unsigned long CHECK_INTERVAL = 30000; // 30 segundos
-
-    if (millis() - lastCheck > CHECK_INTERVAL) {
-        lastCheck = millis();
+        Serial.println();
 
         if (WiFi.status() != WL_CONNECTED) {
-            Serial.println("Conexão WiFi perdida! Tentando reconectar...");
-            reconnect_wifi();
-        } else {
-            Serial.printf("WiFi OK - RSSI: %d dBm\n", WiFi.RSSI());
+            Serial.println(F("[WiFi] CRITICAL: Fallback connection failed. Restarting in 10 seconds..."));
+            delay(10000);
+            ESP.restart();
         }
+    }
+    
+    // If we reach this point, we are connected (either via Manager or fallback)
+    Serial.println(F("[WiFi] Connection established!"));
+    printWifiStatus();
+}
+
+bool isWifiConnected() {
+    return (WiFi.status() == WL_CONNECTED);
+}
+
+void printWifiStatus() {
+    if (isWifiConnected()) {
+        Serial.println(F("\n--- WiFi Status ---"));
+        Serial.print(F("SSID: ")); Serial.println(WiFi.SSID());
+        Serial.print(F("IP Address: ")); Serial.println(WiFi.localIP());
+        Serial.print(F("Signal Strength (RSSI): ")); Serial.print(WiFi.RSSI()); Serial.println(F(" dBm"));
+        Serial.println(F("-------------------\n"));
+    } else {
+        Serial.println(F("[WiFi] Status: Currently Disconnected"));
     }
 }

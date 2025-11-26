@@ -1,264 +1,75 @@
 <p align="center">
-  <img src="images/embarcatech_logo.png" alt="Logo EmbarcaTech" height="100"/>
+  <img src="images/embarcatech_logo.png" alt="EmbarcaTech Logo" height="100"/>
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="images/terelina_logo.png" alt="Logo Terelina" height="100"/>
+  <img src="images/terelina_logo.png" alt="Terelina Logo" height="100"/>
 </p>
 
-# Projeto Terelina - Sistema de Contagem Automática de Pizzas
+# Terelina - Automated Pizza Counter System
 
-## Descrição
+An end-to-end IoT system for automatically counting products on a conveyor belt. This project utilizes an ESP32 with a barrier sensor, a Dockerized FastAPI backend, a PostgreSQL database, and Grafana for real-time data visualization and business insights.
 
-Sistema IoT para contagem automática de pizzas na Terelina, composto por um sensor de barreira óptica conectado a um ESP32 que envia dados via MQTT para um backend FastAPI que salva as contagens em um banco PostgreSQL. **Otimizado para integração com Grafana para dashboards em tempo real.**
+This repository contains the **refactored version (v2.0)** of the project, focusing on robustness, scalability, and modern development best practices.
 
-## Arquitetura
-
+## System Architecture
 ```
-[Sensor Óptico] → [ESP32] → [MQTT Broker] → [FastAPI Backend] → [PostgreSQL] → [Grafana]
-````
-
-### Componentes
-
-- **Firmware ESP32**: Monitora sensor e publica estados via MQTT  
-- **Backend FastAPI**: Recebe dados MQTT e salva no banco  
-- **Banco PostgreSQL**: Armazena contagens de pizzas  
-- **MQTT Broker**: HiveMQ (broker público)  
-- **Grafana**: Dashboards e visualizações em tempo real  
-
----
-
-## Instalação e Configuração
-
-### Pré-requisitos
-
-- Python 3.8+  
-- PostgreSQL (com tabela `contagens_pizzas` existente)  
-- PlatformIO (para firmware ESP32)  
-- ESP32 DevKit  
-- Grafana (para dashboards)  
-
-### Backend
-
-1. **Instalar dependências**:
-```bash
-cd back-end
-pip install -r requirements.txt
-````
-
-2. **Configurar variáveis de ambiente**:
-
-```bash
-# Copiar arquivo de exemplo
-cp env.example .env
-
-# Editar arquivo .env com suas configurações
-DB_HOST=localhost
-DB_NAME=terelina_db
-DB_USER=postgres
-DB_PASSWORD=sua_senha
-DB_PORT=5432
+[Barrier Sensor] → [ESP32] → [MQTT Broker] → [FastAPI Backend] → [PostgreSQL] → [Grafana]
 ```
 
-3. **Executar schema do banco** (apenas tabelas auxiliares):
+## Core Features
 
-```sql
--- Conectar ao banco existente
-\c terelina_db
+- **Real-Time Counting:** An ESP32 microcontroller with an infrared barrier sensor detects and reports each product that passes.
+- **Robust Communication:** Uses the MQTT protocol for reliable, low-latency communication between the device and the backend.
+- **Dockerized Environment:** The entire backend, including the API and the PostgreSQL database, is containerized. A simple `docker-compose up` command is all that's needed to get started.
+- **Modular FastAPI Backend:** A clean, modular, and high-performance API built with FastAPI, featuring a connection pool for efficient database handling.
+- **Optimized Database:** The PostgreSQL schema is enhanced with `VIEW`s to pre-aggregate data, making Grafana queries extremely fast.
+- **User-Friendly Device Setup:** The ESP32 firmware includes **WiFiManager**, which creates a web portal for easy WiFi configuration without needing to hardcode or re-flash for new credentials.
+- **Advanced Data Simulation:** Includes Python scripts to populate the database with a year's worth of realistic data, enabling immediate and meaningful dashboard testing.
 
--- Executar schema (cria views e tabelas auxiliares)
-\i back-end/schema.sql
-```
+## Getting Started
 
-4. **Executar backend**:
+This guide provides a quick start for the backend. For full details, see [INSTALLATION.md](./INSTALLATION.md).
 
-```bash
-cd back-end
-python start_server.py
-```
+### Prerequisites
 
-### Firmware ESP32
+- Git
+- Docker & Docker Compose
 
-1. **Instalar PlatformIO**
-2. **Configurar credenciais WiFi** em `firmware_esp32/src/config.cpp`
-3. **Compilar e fazer upload**:
+### Quick Start Instructions
 
-```bash
-cd firmware_esp32
-pio run --target upload
-```
+1.  **Clone the repository:**
+    ```bash
+    git clone <your-repository-url>
+    cd <your-repository-folder>
+    ```
 
-### Grafana
+2.  **Build and run the containers:**
+    ```bash
+    # This will build the backend image and start the API and database services.
+    docker-compose build
+    docker-compose up -d
+    ```
 
-Consulte o guia completo: [GRAFANA_SETUP.md](GRAFANA_SETUP.md)
-
-**Configuração rápida:**
-
-1. Instalar Grafana
-2. Configurar data source PostgreSQL
-3. Importar dashboards recomendados
-
----
-
-## Endpoints da API
-
-### Endpoints Básicos
-
-* `GET /`: Página inicial
-* `GET /health`: Status da aplicação
-* `GET /test_db_connection`: Testa conexão com banco
-* `GET /contagens`: Lista últimas contagens
-* `GET /contagens/estatisticas`: Estatísticas gerais
-* `GET /logs`: Logs do sistema
-
-### Endpoints para Grafana
-
-* `GET /grafana/contagens-por-hora`: Contagens agrupadas por hora
-* `GET /grafana/contagens-por-dia`: Contagens agrupadas por dia
-* `GET /grafana/velocidade-producao`: Velocidade de produção
-* `GET /grafana/estatisticas-hoje`: Estatísticas do dia atual
-* `GET /grafana/ultimas-contagens`: Últimas contagens em tempo real
-* `GET /grafana/metrics`: Lista de métricas disponíveis
+3.  **Verify the API:**
+    - The API documentation will be available at **`http://localhost:8000/docs`**.
+    - The API health check is at **`http://localhost:8000/health`**.
 
 ---
 
-## Configuração
+## Project Structure
 
-### Variáveis de Ambiente (Backend)
+The repository is organized into two main parts:
 
-* `DB_HOST`: Host do PostgreSQL
-* `DB_NAME`: Nome do banco
-* `DB_USER`: Usuário do banco
-* `DB_PASSWORD`: Senha do banco
-* `DB_PORT`: Porta do PostgreSQL
-* `MQTT_BROKER_HOST`: Broker MQTT
-* `LOG_LEVEL`: Nível de log (INFO, DEBUG, ERROR)
+- **/firmware_esp32:** Contains the C++/Arduino code for the ESP32 microcontroller, managed with PlatformIO. It's responsible for reading the sensor and publishing data.
+- **/back-end:** Contains the Dockerized Python FastAPI application, the database schema, and helper scripts for data population.
 
-### Configurações ESP32
+## Documentation
 
-* WiFi SSID e senha
-* Pino do sensor
-* Configurações MQTT
+- **[INSTALLATION.md](./INSTALLATION.md):** A complete step-by-step guide to get the entire project running from scratch.
+- **[GRAFANA_SETUP.md](./GRAFANA_SETUP.md):** Instructions on how to connect Grafana and create dashboards with useful, optimized queries.
+- **API Documentation (Live):** Available at `http://localhost:8000/docs` when the backend is running.
 
 ---
 
-## Monitoramento e Dashboards
+## Partnership
 
-### Views do Banco de Dados
-
-O sistema cria automaticamente as seguintes views para Grafana:
-
-* `contagens_por_hora`: Contagens agrupadas por hora
-* `contagens_por_dia`: Contagens agrupadas por dia
-* `estatisticas_hoje`: Estatísticas do dia atual
-* `velocidade_producao`: Velocidade de produção
-* `ultimas_contagens_24h`: Últimas contagens das 24h
-
-### Dashboards Recomendados
-
-1. **Visão Geral da Produção**: Métricas gerais e tendências
-2. **Monitoramento Tempo Real**: Contagens em tempo real
-3. **Análise de Performance**: Velocidade e eficiência
-
----
-
-## Segurança
-
-**Importante**: Este projeto usa credenciais hardcoded para demonstração. Em produção:
-
-* Use variáveis de ambiente
-* Implemente autenticação MQTT
-* Use HTTPS
-* Configure firewall adequadamente
-* Configure autenticação no Grafana
-
----
-
-## Troubleshooting
-
-### ESP32 não conecta ao WiFi
-
-* Verificar SSID e senha em `config.cpp`
-* Verificar distância do roteador
-
-### Backend não conecta ao banco
-
-* Verificar se PostgreSQL está rodando
-* Verificar credenciais no arquivo `.env`
-* Verificar se banco `terelina_db` existe
-* Verificar se tabela `contagens_pizzas` existe
-
-### Dados não chegam via MQTT
-
-* Verificar conexão WiFi do ESP32
-* Verificar se broker HiveMQ está acessível
-* Verificar logs do ESP32 via Serial Monitor
-
-### Grafana não mostra dados
-
-* Verificar data source PostgreSQL
-* Testar queries diretamente no banco
-* Verificar timezone das consultas
-* Consultar logs do Grafana
-
----
-
-## Melhorias Implementadas
-
-### Funcionalidades Adicionadas
-
-* [x] Logging estruturado com arquivo de log
-* [x] Configuração via variáveis de ambiente (.env)
-* [x] Validação com Pydantic para todos os endpoints
-* [x] Tratamento de erros robusto com handlers globais
-* [x] CORS configurado para integração web
-* [x] Endpoints específicos para Grafana
-* [x] Views otimizadas para dashboards
-* [x] Sistema de logs centralizado
-* [x] Monitoramento de saúde da aplicação
-* [x] API documentada com Swagger
-* [x] Configuração flexível via arquivos .env
-
-### Integração Grafana
-
-* [x] Views otimizadas para consultas
-* [x] Endpoints específicos para time series
-* [x] Queries otimizadas para performance
-* [x] Guia completo de configuração
-* [x] Dashboards recomendados
-* [x] Alertas configuráveis
-
----
-
-## Próximos Passos
-
-* [ ] Interface web para visualização
-* [ ] Autenticação MQTT
-* [ ] Métricas e alertas avançados
-* [ ] Backup automático
-* [ ] Dockerização
-* [ ] Testes automatizados
-* [ ] API REST para configurações
-* [ ] Sistema de notificações
-
----
-
-## Documentação Adicional
-
-* [Guia de Instalação Completo](INSTALACAO.md)
-* [Configuração do Grafana](GRAFANA_SETUP.md)
-* [API Documentation](http://localhost:8000/docs) (quando rodando)
-
----
-
-## Parceria
-
-Este projeto está sendo desenvolvido em colaboração entre a **Terelina** e o programa **EmbarcaTech - Residência Tecnológica em Sistemas Embarcados**.
-
-<p align="center">
-  <img src="images/embarcatech_logo.png" alt="Logo EmbarcaTech" height="100"/>
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="images/terelina_logo.png" alt="Logo Terelina" height="100"/>
-</p>
-
----
-
-**Sistema Terelina v1.0.0** - Otimizado para produção e monitoramento em tempo real.
+This project is a collaboration between **Terelina** and the **EmbarcaTech Program - a Technological Residency in Embedded Systems**.

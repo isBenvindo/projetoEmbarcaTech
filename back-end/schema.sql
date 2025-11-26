@@ -1,186 +1,129 @@
--- Schema Terelina (UTC-aware, sem índices)
+-- Terelina Database Schema (UTC-aware)
 
 -- ======================================================================
--- Tabelas
+-- Tables
 -- ======================================================================
 
--- Tabela principal
-CREATE TABLE IF NOT EXISTS contagens_pizzas (
+-- Main table for product counts
+CREATE TABLE IF NOT EXISTS pizza_counts (
     id SERIAL PRIMARY KEY,
-    -- timestamptz armazena em UTC e converte na leitura conforme timezone da sessão
     "timestamp" TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Tabela: logs do sistema
-CREATE TABLE IF NOT EXISTS logs_sistema (
+-- System logs for monitoring and debugging
+CREATE TABLE IF NOT EXISTS system_logs (
     id SERIAL PRIMARY KEY,
-    nivel VARCHAR(10) NOT NULL, -- INFO|WARNING|ERROR
-    mensagem TEXT NOT NULL,
-    origem VARCHAR(50) NOT NULL, -- backend|mqtt|sensor
+    level VARCHAR(10) NOT NULL, -- INFO|WARNING|ERROR
+    message TEXT NOT NULL,
+    source VARCHAR(50) NOT NULL, -- backend|mqtt|sensor
     "timestamp" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    -- (opcional, mas útil) valida nível
-    CONSTRAINT logs_sistema_nivel_chk CHECK (nivel IN ('INFO','WARNING','ERROR'))
+    CONSTRAINT system_logs_level_chk CHECK (level IN ('INFO','WARNING','ERROR'))
 );
 
--- Tabela: configurações do sistema
-CREATE TABLE IF NOT EXISTS configuracoes_sistema (
+-- Dynamic system settings
+CREATE TABLE IF NOT EXISTS system_settings (
     id SERIAL PRIMARY KEY,
-    chave VARCHAR(100) UNIQUE NOT NULL,
-    valor TEXT,
-    descricao TEXT,
+    key VARCHAR(100) UNIQUE NOT NULL,
+    value TEXT,
+    description TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ======================================================================
--- View de compatibilidade (coluna timestampz)
--- Útil para consultas/dashboards que esperam "timestampz"
+-- Indexes (Performance Improvements)
 -- ======================================================================
 
-CREATE OR REPLACE VIEW contagens_pizzas_utc AS
+-- Speed up time-based queries and ordering
+CREATE INDEX IF NOT EXISTS idx_pizza_counts_timestamp ON pizza_counts ("timestamp" DESC);
+
+-- Speed up log filtering and ordering
+CREATE INDEX IF NOT EXISTS idx_system_logs_timestamp ON system_logs ("timestamp" DESC);
+CREATE INDEX IF NOT EXISTS idx_system_logs_level ON system_logs (level);
+
+-- ======================================================================
+-- Views (Optimized for Grafana)
+-- ======================================================================
+
+-- Compatibility view (maps 'timestamp' to 'timestampz')
+CREATE OR REPLACE VIEW pizza_counts_utc AS
 SELECT
   id,
   "timestamp" AS timestampz
-FROM contagens_pizzas;
+FROM pizza_counts;
 
--- ======================================================================
--- Views (UTC friendly) - recriáveis
--- ======================================================================
-
-CREATE OR REPLACE VIEW contagens_por_hora AS
+-- Counts aggregated by hour
+CREATE OR REPLACE VIEW hourly_counts AS
 SELECT 
-    DATE_TRUNC('hour', "timestamp") AS hora,
-    COUNT(*) AS total_contagens,
+    DATE_TRUNC('hour', "timestamp") AS hour,
+    COUNT(*) AS total_counts,
     EXTRACT(EPOCH FROM DATE_TRUNC('hour', "timestamp")) AS timestamp_unix
-FROM contagens_pizzas
+FROM pizza_counts
 GROUP BY DATE_TRUNC('hour', "timestamp")
-ORDER BY hora;
+ORDER BY hour;
 
-CREATE OR REPLACE VIEW contagens_por_dia AS
+-- Counts aggregated by day
+CREATE OR REPLACE VIEW daily_counts AS
 SELECT 
-    DATE("timestamp") AS data,
-    COUNT(*) AS total_contagens,
+    DATE("timestamp") AS date,
+    COUNT(*) AS total_counts,
     EXTRACT(EPOCH FROM DATE("timestamp")) AS timestamp_unix
-FROM contagens_pizzas
+FROM pizza_counts
 GROUP BY DATE("timestamp")
-ORDER BY data;
+ORDER BY date;
 
-CREATE OR REPLACE VIEW estatisticas_hoje AS
+-- Statistics for the current day
+CREATE OR REPLACE VIEW today_stats AS
 SELECT 
-    COUNT(*) AS total_contagens,
-    MIN("timestamp"::time) AS primeiro_horario,
-    MAX("timestamp"::time) AS ultimo_horario,
-    DATE("timestamp") AS data,
+    COUNT(*) AS total_counts,
+    MIN("timestamp"::time) AS first_count_time,
+    MAX("timestamp"::time) AS last_count_time,
+    DATE("timestamp") AS date,
     EXTRACT(EPOCH FROM CURRENT_TIMESTAMP) AS timestamp_unix
-FROM contagens_pizzas
+FROM pizza_counts
 WHERE DATE("timestamp") = CURRENT_DATE
 GROUP BY DATE("timestamp");
 
-CREATE OR REPLACE VIEW ultimas_contagens_24h AS
+-- Recent counts (last 24h)
+CREATE OR REPLACE VIEW recent_counts_24h AS
 SELECT 
     id,
     "timestamp",
     EXTRACT(EPOCH FROM "timestamp") AS timestamp_unix,
-    EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "timestamp"))::INTEGER AS segundos_atras
-FROM contagens_pizzas
+    EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - "timestamp"))::INTEGER AS seconds_ago
+FROM pizza_counts
 WHERE "timestamp" >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
 ORDER BY "timestamp" DESC;
 
-CREATE OR REPLACE VIEW velocidade_producao AS
+-- Production speed (pizzas per hour)
+CREATE OR REPLACE VIEW production_speed AS
 SELECT 
-    DATE_TRUNC('hour', "timestamp") AS hora,
-    COUNT(*) AS pizzas_por_hora,
+    DATE_TRUNC('hour', "timestamp") AS hour,
+    COUNT(*) AS pizzas_per_hour,
     EXTRACT(EPOCH FROM DATE_TRUNC('hour', "timestamp")) AS timestamp_unix,
-    ROUND(COUNT(*)::NUMERIC / 1, 2) AS pizzas_por_hora_decimal
-FROM contagens_pizzas
+    ROUND(COUNT(*)::NUMERIC / 1, 2) AS pizzas_per_hour_decimal
+FROM pizza_counts
 WHERE "timestamp" >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
 GROUP BY DATE_TRUNC('hour', "timestamp")
-ORDER BY hora;
+ORDER BY hour;
 
 -- ======================================================================
--- Funções (ajustadas para TIMESTAMPTZ)
+-- Default Settings Seed
 -- ======================================================================
 
--- Contagens por intervalo
-CREATE OR REPLACE FUNCTION get_contagens_intervalo(
-    inicio_timestamp   TIMESTAMPTZ,
-    fim_timestamp      TIMESTAMPTZ,
-    intervalo_minutos  INTEGER DEFAULT 60
-)
-RETURNS TABLE (
-    periodo        TIMESTAMPTZ,
-    contagens      BIGINT,
-    timestamp_unix BIGINT
-) AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        DATE_TRUNC('hour', c."timestamp")
-        + (EXTRACT(MINUTE FROM c."timestamp")::INTEGER / intervalo_minutos)
-          * (intervalo_minutos || ' minutes')::INTERVAL AS periodo,
-        COUNT(*)::BIGINT AS contagens,
-        EXTRACT(EPOCH FROM (
-            DATE_TRUNC('hour', c."timestamp")
-            + (EXTRACT(MINUTE FROM c."timestamp")::INTEGER / intervalo_minutos)
-              * (intervalo_minutos || ' minutes')::INTERVAL
-        ))::BIGINT AS timestamp_unix
-    FROM contagens_pizzas c
-    WHERE c."timestamp" BETWEEN inicio_timestamp AND fim_timestamp
-    GROUP BY 1
-    ORDER BY 1;
-END;
-$$ LANGUAGE plpgsql;
-
--- Estatísticas de produção (por dia)
-CREATE OR REPLACE FUNCTION get_estatisticas_producao(
-    dias_atras INTEGER DEFAULT 7
-)
-RETURNS TABLE (
-    data            DATE,
-    total_contagens BIGINT,
-    media_por_hora  NUMERIC,
-    pico_hora       TIME,
-    timestamp_unix  BIGINT
-) AS $$
-BEGIN
-    RETURN QUERY
-    SELECT 
-        DATE(c."timestamp") AS data,
-        COUNT(*)::BIGINT AS total_contagens,
-        ROUND(COUNT(*)::NUMERIC / 24, 2) AS media_por_hora,
-        (
-            SELECT c2."timestamp"::time
-            FROM contagens_pizzas c2
-            WHERE DATE(c2."timestamp") = DATE(c."timestamp")
-            GROUP BY c2."timestamp"::time
-            ORDER BY COUNT(*) DESC
-            LIMIT 1
-        ) AS pico_hora,
-        EXTRACT(EPOCH FROM DATE(c."timestamp"))::BIGINT AS timestamp_unix
-    FROM contagens_pizzas c
-    WHERE c."timestamp" >= CURRENT_DATE - (dias_atras || ' days')::INTERVAL
-    GROUP BY DATE(c."timestamp")
-    ORDER BY data;
-END;
-$$ LANGUAGE plpgsql;
+INSERT INTO system_settings (key, value, description) VALUES
+('system_name', 'Terelina Pizza Counter', 'System Display Name'),
+('version', '1.0.0', 'Current System Version'),
+('timezone', 'America/Sao_Paulo', 'System Timezone'),
+('log_retention_days', '30', 'Days to keep logs'),
+('cleanup_interval_hours', '24', 'Interval for automatic cleanup')
+ON CONFLICT (key) DO NOTHING;
 
 -- ======================================================================
--- Seed de configurações padrão
+-- Functions & Triggers
 -- ======================================================================
 
-INSERT INTO configuracoes_sistema (chave, valor, descricao) VALUES
-('sistema_nome', 'Terelina Pizza Counter', 'Nome do sistema'),
-('versao', '1.0.0', 'Versão atual do sistema'),
-('timezone', 'America/Sao_Paulo', 'Fuso horário do sistema'),
-('retencao_logs_dias', '30', 'Dias para manter logs'),
-('intervalo_limpeza_horas', '24', 'Intervalo para limpeza de logs antigos')
-ON CONFLICT (chave) DO NOTHING;
-
--- ======================================================================
--- Triggers e manutenção
--- ======================================================================
-
--- Atualiza updated_at
+-- Auto-update 'updated_at' column
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -189,50 +132,35 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger: atualiza updated_at em configuracoes_sistema
-DROP TRIGGER IF EXISTS update_configuracoes_updated_at ON configuracoes_sistema;
-CREATE TRIGGER update_configuracoes_updated_at
-    BEFORE UPDATE ON configuracoes_sistema
+DROP TRIGGER IF EXISTS update_system_settings_updated_at ON system_settings;
+CREATE TRIGGER update_system_settings_updated_at
+    BEFORE UPDATE ON system_settings
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Limpeza de logs antigos
-CREATE OR REPLACE FUNCTION limpar_logs_antigos()
+-- Cleanup old logs
+CREATE OR REPLACE FUNCTION cleanup_old_logs()
 RETURNS INTEGER AS $$
 DECLARE
-    dias_retencao INTEGER;
-    registros_removidos INTEGER;
+    retention_days INTEGER;
+    deleted_count INTEGER;
 BEGIN
-    -- Lê retenção (dias)
-    SELECT valor::INTEGER INTO dias_retencao
-    FROM configuracoes_sistema
-    WHERE chave = 'retencao_logs_dias';
+    -- Get retention period
+    SELECT value::INTEGER INTO retention_days
+    FROM system_settings
+    WHERE key = 'log_retention_days';
 
-    IF dias_retencao IS NULL THEN
-        dias_retencao := 30; -- padrão
+    IF retention_days IS NULL THEN
+        retention_days := 30; -- default
     END IF;
 
-    -- Remove logs antigos
-    DELETE FROM logs_sistema
-    WHERE "timestamp" < CURRENT_TIMESTAMP - (dias_retencao || ' days')::INTERVAL;
+    DELETE FROM system_logs
+    WHERE "timestamp" < CURRENT_TIMESTAMP - (retention_days || ' days')::INTERVAL;
 
-    GET DIAGNOSTICS registros_removidos = ROW_COUNT;
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
 
-    -- Log da limpeza
-    INSERT INTO logs_sistema (nivel, mensagem, origem)
-    VALUES ('INFO', 'Limpeza automática: ' || registros_removidos || ' registros removidos', 'sistema');
+    INSERT INTO system_logs (level, message, source)
+    VALUES ('INFO', 'Auto cleanup: ' || deleted_count || ' logs removed', 'system');
 
-    RETURN registros_removidos;
+    RETURN deleted_count;
 END;
 $$ LANGUAGE plpgsql;
-
--- ======================================================================
--- Comentários
--- ======================================================================
-
-COMMENT ON TABLE contagens_pizzas IS 'Tabela existente: pizzas detectadas (timestamptz, UTC)';
-COMMENT ON TABLE logs_sistema IS 'Logs de eventos do sistema para monitoramento';
-COMMENT ON TABLE configuracoes_sistema IS 'Configurações do sistema';
-COMMENT ON VIEW contagens_pizzas_utc IS 'View de compatibilidade com coluna timestampz (mapeia "timestamp" -> "timestampz")';
-COMMENT ON VIEW contagens_por_hora IS 'View para gráficos de contagens por hora no Grafana (UTC-aware)';
-COMMENT ON VIEW contagens_por_dia IS 'View para gráficos de contagens por dia no Grafana (UTC-aware)';
-COMMENT ON VIEW velocidade_producao IS 'View para análise de velocidade de produção (UTC-aware)';

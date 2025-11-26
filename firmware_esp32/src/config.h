@@ -1,26 +1,35 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
-// ===== WiFi =====
-extern const char* ssid;
-extern const char* password;
+// =====================================================================
+// WiFi Settings
+// =====================================================================
+// Note: These are fallback credentials if WiFi Manager fails or is not used.
+extern const char* WIFI_SSID;
+extern const char* WIFI_PASSWORD;
 
-// ===== MQTT =====
-extern const char* mqtt_server;
-extern const int   mqtt_port;
-extern const char* mqtt_user;
-extern const char* mqtt_pass;
-extern const char* mqtt_topic_state;      // ex.: "sensores/barreira/estado"
-extern const char* mqtt_topic_heartbeat;  // ex.: "sensores/barreira/heartbeat"
-extern const char* mqtt_client_id;        // usado como device_id no payload
+// =====================================================================
+// MQTT Broker Settings
+// =====================================================================
+extern const char* MQTT_BROKER_HOST;
+extern const int   MQTT_BROKER_PORT;
+extern const char* MQTT_USER;
+extern const char* MQTT_PASSWORD;
+extern const char* MQTT_TOPIC_STATE;     // Topic to publish sensor state, e.g., "sensors/barrier/state"
+extern const char* MQTT_TOPIC_HEARTBEAT; // Topic for device status heartbeat, e.g., "sensors/barrier/heartbeat"
+extern const char* MQTT_CLIENT_ID;       // Unique client ID, also used as device_id in the payload
 
-// ===== Hardware =====
-extern const int  SENSOR_PIN;          // pino do sensor (INPUT_PULLUP por padrão)
-extern const bool SENSOR_USE_PULLUP;   // NOVO: true => usa INPUT_PULLUP no setup
-extern const bool SENSOR_ACTIVE_LOW;   // NOVO: true => LOW = interrompido, HIGH = livre
+// =====================================================================
+// Hardware Pinout & Behavior
+// =====================================================================
+extern const int  SENSOR_PIN;        // GPIO pin connected to the barrier sensor
+extern const bool SENSOR_USE_PULLUP; // If true, enables the internal pull-up resistor (INPUT_PULLUP)
+extern const bool SENSOR_ACTIVE_LOW; // If true, a LOW signal means the beam is interrupted (active state)
 
-// ===== Timing =====
-extern const unsigned long HEARTBEAT_INTERVAL;     // ms
-extern const unsigned long SENSOR_DEBOUNCE_DELAY;  // ms (usamos em µs no código: *1000UL)
+// =====================================================================
+// Timing Configuration
+// =====================================================================
+extern const unsigned long HEARTBEAT_INTERVAL_MS;   // Interval for sending MQTT heartbeat messages (in milliseconds)
+extern const unsigned long SENSOR_DEBOUNCE_DELAY_MS; // Debounce delay to prevent false readings (in milliseconds)
 
-#endif
+#endif // CONFIG_H

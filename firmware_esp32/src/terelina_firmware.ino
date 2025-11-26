@@ -1,145 +1,148 @@
+/**
+ * @file terelina_firmware.ino
+ * @brief Main firmware for the Terelina Pizza Counter device.
+ *
+ * This firmware initializes the hardware, connects to WiFi via WiFiManager,
+ * connects to MQTT, reads the barrier sensor with debounce, and publishes state changes.
+ */
+
 #include <Arduino.h>
 #include "config.h"
 #include "wifi_manager.h"
 #include "mqtt.h"
 
-// Estado global
-unsigned long lastMsg = 0;
-bool lastSensorState = false;   // HIGH = livre, LOW = interrompido (com INPUT_PULLUP)
-bool wifiConnected = false;
-bool mqttConnected = false;
+// =====================================================================
+// Global State
+// =====================================================================
 
-unsigned long pizzaCount = 0;
-unsigned long mqttReconnectAttempts = 0;
-unsigned long lastWifiCheck = 0;
-const unsigned long WIFI_CHECK_INTERVAL = 30000; // 30 s
+// 'true' means the sensor beam is currently interrupted.
+bool isBeamInterrupted = false;
 
+// Timer for the non-blocking heartbeat task.
+unsigned long lastHeartbeatMillis = 0;
+
+
+// =====================================================================
+// SETUP - Runs once on boot.
+// =====================================================================
 void setup() {
     Serial.begin(115200);
     Serial.println();
-    Serial.println("==========================================");
-    Serial.println("    SISTEMA DE CONTAGEM TERELINA");
-    Serial.println("==========================================");
+    Serial.println(F("=========================================="));
+    Serial.println(F("    Terelina Pizza Counter System"));
+    Serial.println(F("=========================================="));
     Serial.println();
 
-    // Sensor (pull-up interno; HIGH=livre, LOW=interrompido)
-    pinMode(SENSOR_PIN, INPUT_PULLUP);
-    Serial.printf("Sensor configurado no GPIO %d (INPUT_PULLUP)\n", SENSOR_PIN);
+    // --- 1. Configure Hardware Sensor ---
+    if (SENSOR_USE_PULLUP) {
+        pinMode(SENSOR_PIN, INPUT_PULLUP);
+        Serial.printf("[HW] Sensor pin %d configured with INPUT_PULLUP.\n", SENSOR_PIN);
+    } else {
+        pinMode(SENSOR_PIN, INPUT);
+        Serial.printf("[HW] Sensor pin %d configured as standard INPUT.\n", SENSOR_PIN);
+    }
 
-    // Sincroniza estado inicial para evitar transição falsa no boot
-    lastSensorState = (digitalRead(SENSOR_PIN) == HIGH);
+    // Read the initial state to prevent a false trigger on boot.
+    isBeamInterrupted = (digitalRead(SENSOR_PIN) == (SENSOR_ACTIVE_LOW ? LOW : HIGH));
+    Serial.printf("[HW] Initial sensor state: %s\n", isBeamInterrupted ? "INTERRUPTED" : "CLEAR");
 
-    // WiFi
-    Serial.println("Iniciando conexão WiFi...");
-    setup_wifi();
-    wifiConnected = true;
-    Serial.printf("WiFi conectado! IP: %s\n", WiFi.localIP().toString().c_str());
+    // --- 2. Connect to WiFi ---
+    // This function is blocking. It will handle the connection, AP portal,
+    // and fallback logic automatically.
+    setupWifi();
 
-    // MQTT
-    Serial.println("Configurando cliente MQTT...");
-    mqtt_init(); // define servidor, buffer, keepalive, etc.
-    Serial.printf("MQTT configurado para: %s:%d\n", mqtt_server, mqtt_port);
+    // --- 3. Initialize MQTT Client ---
+    Serial.println(F("[MQTT] Initializing MQTT client..."));
+    setupMqtt(); // Sets the broker server, port, buffer, etc.
 
-    // Conexão inicial MQTT
-    reconnect_mqtt();
-
-    Serial.println("Sistema inicializado com sucesso!");
-    Serial.println("==========================================");
+    Serial.println(F("=========================================="));
+    Serial.println(F("System initialized. Starting main loop..."));
     Serial.println();
 }
 
+
+// =====================================================================
+// LOOP - Runs repeatedly.
+// =====================================================================
 void loop() {
-    unsigned long now = millis();
+    // This is the core of the firmware. Each function is non-blocking.
 
-    // Verifica WiFi periodicamente
-    if (now - lastWifiCheck > WIFI_CHECK_INTERVAL) {
-        check_wifi_connection();
-        lastWifiCheck = now;
-    }
+    // 1. Maintain MQTT connection and process messages.
+    handleMqttConnection();
+    loopMqtt();
 
-    // Gerencia MQTT
-    if (!client.connected()) {
-        mqttConnected = false;
-        reconnect_mqtt();
-    } else {
-        mqttConnected = true;
-    }
+    // 2. Read the sensor and publish any state changes.
+    handleSensor();
 
-    // Processa MQTT
-    mqtt_loop();
+    // 3. Perform periodic tasks, like sending the heartbeat.
+    handleTimedTasks();
 
-    // Lê sensor (HIGH=livre, LOW=interrompido)
-    int raw = digitalRead(SENSOR_PIN);
-    bool currentSensorState = (raw == HIGH);
-
-    // Debug do pino bruto (a cada ~500 ms)
-    static unsigned long lastDbg = 0;
-    if (now - lastDbg > 500) {
-        lastDbg = now;
-        Serial.printf("[DBG] raw=%d  interpretado=%s\n",
-                      raw, currentSensorState ? "LIVRE" : "INTERROMPIDO");
-    }
-
-    // Detecta mudança com debounce em micros (não bloqueante)
-    static unsigned long lastChangeUs = 0;
-    if (currentSensorState != lastSensorState) {
-        unsigned long nowUs = micros();
-        if (nowUs - lastChangeUs >= (SENSOR_DEBOUNCE_DELAY * 1000UL)) {
-            lastChangeUs = nowUs;
-
-            Serial.printf("Mudança de estado do sensor: %s -> %s\n",
-                          lastSensorState ? "LIVRE" : "INTERROMPIDO",
-                          currentSensorState ? "LIVRE" : "INTERROMPIDO");
-
-            if (mqttConnected) {
-                publish_sensor_state(currentSensorState);
-
-                // Conta pizza (transição interrompido -> livre)
-                if (!lastSensorState && currentSensorState) {
-                    pizzaCount++;
-                    Serial.printf("PIZZA DETECTADA! Total: %lu\n", pizzaCount);
-                }
-            } else {
-                Serial.println("MQTT desconectado - não foi possível publicar estado");
-            }
-
-            lastSensorState = currentSensorState;
-        }
-    }
-
-    // Heartbeat
-    if (now - lastMsg > HEARTBEAT_INTERVAL) {
-        lastMsg = now;
-        if (mqttConnected) {
-            client.publish(mqtt_topic_heartbeat, "ativo");
-            Serial.println("Heartbeat enviado");
-        } else {
-            Serial.println("Heartbeat não enviado - MQTT desconectado");
-        }
-    }
-
-    // Evitar travas longas no loop
+    // Small delay to allow the ESP32's background tasks to run.
     delay(1);
 }
 
-// WiFi helpers
-void check_wifi_connection() {
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("Conexão WiFi perdida! Tentando reconectar...");
-        wifiConnected = false;
-        setup_wifi();
-        wifiConnected = true;
-        Serial.printf("WiFi reconectado! IP: %s\n", WiFi.localIP().toString().c_str());
+
+// =====================================================================
+// Helper Functions for the Main Loop
+// =====================================================================
+
+/**
+ * @brief Reads the sensor, applies debounce logic, and publishes if the state changes.
+ */
+void handleSensor() {
+    // 'static' variables retain their value between calls to loop().
+    static bool lastPublishedState = isBeamInterrupted;
+    static unsigned long lastFlickerTime = 0;
+
+    bool currentState = (digitalRead(SENSOR_PIN) == (SENSOR_ACTIVE_LOW ? LOW : HIGH));
+
+    if (currentState != lastPublishedState) {
+        // If the state has changed, wait for the debounce delay to ensure it's a stable change.
+        if (millis() - lastFlickerTime > SENSOR_DEBOUNCE_DELAY_MS) {
+            
+            Serial.printf("[Sensor] State change confirmed: %s -> %s\n",
+                          lastPublishedState ? "INTERRUPTED" : "CLEAR",
+                          currentState ? "INTERRUPTED" : "CLEAR");
+
+            // Update the global state and publish it.
+            isBeamInterrupted = currentState;
+            lastPublishedState = currentState;
+            publishSensorState(isBeamInterrupted);
+        }
+    } else {
+        // If the state has not changed, reset the flicker timer.
+        // This means the signal is stable.
+        lastFlickerTime = millis();
     }
 }
 
-void print_system_status() {
-    Serial.println("\n=== STATUS DO SISTEMA ===");
-    Serial.printf("WiFi: %s\n", wifiConnected ? "Conectado" : "Desconectado");
-    Serial.printf("MQTT: %s\n", mqttConnected ? "Conectado" : "Desconectado");
-    Serial.printf("Sensor: %s\n", lastSensorState ? "LIVRE" : "INTERROMPIDO");
-    Serial.printf("Pizzas contadas: %lu\n", pizzaCount);
-    Serial.printf("Tentativas MQTT: %lu\n", mqttReconnectAttempts);
+/**
+ * @brief Handles periodic tasks that are not checked in every loop cycle.
+ */
+void handleTimedTasks() {
+    unsigned long now = millis();
+
+    // --- MQTT Heartbeat Task ---
+    if (now - lastHeartbeatMillis > HEARTBEAT_INTERVAL_MS) {
+        lastHeartbeatMillis = now;
+        
+        // This function already checks for MQTT connection before publishing.
+        publishHeartbeat();
+        
+        // Also print a general status update for debugging.
+        printSystemStatus();
+    }
+}
+
+/**
+ * @brief Prints a summary of the system's current status to the Serial Monitor.
+ */
+void printSystemStatus() {
+    Serial.println(F("\n--- System Status ---"));
+    Serial.printf("WiFi: %s\n", isWifiConnected() ? "Connected" : "Disconnected");
+    Serial.printf("MQTT: %s\n", isMqttConnected() ? "Connected" : "Disconnected");
+    Serial.printf("Sensor: %s\n", isBeamInterrupted ? "INTERRUPTED" : "CLEAR");
+    Serial.printf("Free Heap: %u bytes\n", ESP.getFreeHeap());
     Serial.printf("Uptime: %lu s\n", millis() / 1000);
-    Serial.println("========================\n");
+    Serial.println(F("---------------------\n"));
 }

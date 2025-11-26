@@ -53,3 +53,5 @@ node_modules/
 *.bak
 *.tmp
 ~$*
+
+src/secrets.h

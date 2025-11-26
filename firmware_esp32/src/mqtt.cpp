@@ -1,148 +1,134 @@
+/**
+ * @file mqtt.cpp
+ * @brief Handles all MQTT communication for the Terelina project.
+ * 
+ * Manages connection, reconnection with Last Will and Testament (LWT),
+ * and publishing of sensor data and device status.
+ */
+
 #include "mqtt.h"
 #include "config.h"
 #include <Arduino.h>
-#include <WiFi.h>
 #include <WiFiClient.h>
-#include <ArduinoJson.h>
 
-// ===== Globais =====
-WiFiClient espClient;
-PubSubClient client(espClient);
+// =====================================================================
+// Global and Static Variables
+// =====================================================================
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
 
-static unsigned long lastReconnectAttempt = 0;
-static const unsigned long RECONNECT_INTERVAL = 5000; // ms
+static unsigned long lastMqttReconnectAttempt = 0;
+static const unsigned long RECONNECT_INTERVAL_MS = 5000; // Attempt to reconnect every 5 seconds
 
-// ===== NOVO: inicialização do cliente MQTT =====
-void mqtt_init() {
-  // Antes não havia setServer nem ajuste de buffer, causando falhas silenciosas.
-  client.setServer(mqtt_server, mqtt_port);
-  client.setBufferSize(512);   // JSONs >128 bytes
-  client.setKeepAlive(30);     // mais resiliente
-  client.setSocketTimeout(5);  // evita travas longas
+// =====================================================================
+// Core MQTT Functions (Initialization and Loop)
+// =====================================================================
+
+void setupMqtt() {
+  mqttClient.setServer(MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+  mqttClient.setBufferSize(256); // A buffer of 256 bytes is sufficient for our JSON payload
+  mqttClient.setKeepAlive(30);   // More resilient to network fluctuations
+  mqttClient.setSocketTimeout(5); // Prevent long blocking calls
 }
 
-// ===== Conexão MQTT com LWT + retain no "online" =====
-void reconnect_mqtt() {
-  unsigned long now = millis();
-  if (now - lastReconnectAttempt < RECONNECT_INTERVAL) return;
-  lastReconnectAttempt = now;
-
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("WiFi desconectado - não é possível conectar MQTT");
+void handleMqttConnection() {
+  if (mqttClient.connected()) {
     return;
   }
 
-  Serial.print("Tentando conexão MQTT... ");
+  unsigned long now = millis();
+  if (now - lastMqttReconnectAttempt < RECONNECT_INTERVAL_MS) {
+    return;
+  }
+  lastMqttReconnectAttempt = now;
 
-  const char* willMsg = "{\"status\":\"offline\"}";
-  bool useAuth = (mqtt_user && strlen(mqtt_user) > 0) || (mqtt_pass && strlen(mqtt_pass) > 0);
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("[MQTT] WiFi not connected. Cannot attempt MQTT connection."));
+    return;
+  }
+
+  Serial.print(F("[MQTT] Attempting connection... "));
+
+  // --- LWT Configuration ---
+  // If the device disconnects unexpectedly, the broker will publish "offline"
+  // to the heartbeat topic. This is the correct topic for status updates.
+  const char* lwtTopic = MQTT_TOPIC_HEARTBEAT;
+  const char* lwtMessage = "offline";
+  const bool lwtRetain = true;
+  const int lwtQos = 1;
+
   bool connected = false;
-
-  if (useAuth) {
-    Serial.println("(com autenticação + LWT)");
-    // overload: client.connect(clientId, user, pass, willTopic, willQos, willRetain, willMessage)
-    connected = client.connect(
-      mqtt_client_id,
-      mqtt_user, mqtt_pass,
-      mqtt_topic_state,  // willTopic
-      1,                 // willQos (PubSubClient publica QoS0 por baixo, ok)
-      true,              // willRetain
-      willMsg
-    );
+  if (strlen(MQTT_USER) > 0) {
+    Serial.print(F("with authentication... "));
+    connected = mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASSWORD, lwtTopic, lwtQos, lwtRetain, lwtMessage);
   } else {
-    Serial.println("(sem autenticação + LWT)");
-    // overload: client.connect(clientId, willTopic, willQos, willRetain, willMessage)
-    connected = client.connect(
-      mqtt_client_id,
-      mqtt_topic_state,
-      1,
-      true,
-      willMsg
-    );
+    Serial.print(F("without authentication... "));
+    connected = mqttClient.connect(MQTT_CLIENT_ID, lwtTopic, lwtQos, lwtRetain, lwtMessage);
   }
 
   if (connected) {
-    Serial.println("MQTT conectado com sucesso!");
-
-    // Publica "online" com retain => painéis/consumidores veem o estado atual imediatamente
-    client.publish(mqtt_topic_state, "{\"status\":\"online\"}", true /*retain*/);
-    Serial.println("Estado 'online' publicado (retain)");
-
-    publish_device_info();
+    Serial.println(F("OK!"));
+    // Once connected, publish the "online" status to the same heartbeat topic
+    publishHeartbeat();
   } else {
-    Serial.print("Falha na conexão MQTT, rc=");
-    Serial.print(client.state());
-    const char* error_msg = "erro desconhecido";
-    switch (client.state()) {
-      case -4: error_msg = "MQTT_CONNECTION_TIMEOUT"; break;
-      case -3: error_msg = "MQTT_CONNECTION_LOST"; break;
-      case -2: error_msg = "MQTT_CONNECT_FAILED"; break;
-      case -1: error_msg = "MQTT_DISCONNECTED"; break;
-      case 1:  error_msg = "MQTT_CONNECT_BAD_PROTOCOL"; break;
-      case 2:  error_msg = "MQTT_CONNECT_BAD_CLIENT_ID"; break;
-      case 3:  error_msg = "MQTT_CONNECT_UNAVAILABLE"; break;
-      case 4:  error_msg = "MQTT_CONNECT_BAD_CREDENTIALS"; break;
-      case 5:  error_msg = "MQTT_CONNECT_UNAUTHORIZED"; break;
-    }
-    Serial.printf(" (%s)\nPróxima tentativa em %lu s\n", error_msg, RECONNECT_INTERVAL / 1000);
+    Serial.print(F("FAILED, rc="));
+    Serial.print(mqttClient.state());
+    Serial.println(F(". Retrying in 5 seconds."));
   }
 }
 
-// ===== Publica estado do sensor =====
-void publish_sensor_state(bool is_free) {
-  if (!client.connected()) {
-    Serial.println("MQTT desconectado - não foi possível publicar estado");
+void loopMqtt() {
+  mqttClient.loop();
+}
+
+// =====================================================================
+// Data Publishing Functions
+// =====================================================================
+
+void publishSensorState(bool isInterrupted) {
+  if (!isMqttConnected()) {
+    Serial.println(F("[MQTT] Not connected. Cannot publish sensor state."));
     return;
   }
 
-  StaticJsonDocument<200> doc;
-  doc["id"] = mqtt_client_id;
-  doc["timestamp_ms"] = (uint64_t)millis();                // numérico
-  doc["state"] = is_free ? "livre" : "interrompido";       // padronizado c/ backend
-  doc["uptime_s"] = (uint32_t)(millis() / 1000);
+  StaticJsonDocument<128> doc;
+  doc["id"] = MQTT_CLIENT_ID;
+  
+  // --- PAYLOAD ALIGNMENT ---
+  // The backend expects "interrupted" or "clear".
+  doc["state"] = isInterrupted ? "interrupted" : "clear";
+  
+  // Optional diagnostic data
   doc["rssi"] = WiFi.RSSI();
+  doc["uptime_s"] = millis() / 1000;
 
-  char json_buffer[200];
-  size_t n = serializeJson(doc, json_buffer);
+  char jsonBuffer[128];
+  serializeJson(doc, jsonBuffer);
 
-  bool ok = client.publish(mqtt_topic_state, json_buffer, false /*retain*/);
-  if (ok) Serial.printf("Estado publicado: %s\n", json_buffer);
-  else    Serial.println("Falha ao publicar estado do sensor");
+  if (mqttClient.publish(MQTT_TOPIC_STATE, jsonBuffer)) {
+    Serial.print(F("[MQTT] State published: "));
+    Serial.println(jsonBuffer);
+  } else {
+    Serial.println(F("[MQTT] Failed to publish state."));
+  }
 }
 
-// ===== Publica informações do dispositivo =====
-void publish_device_info() {
-  StaticJsonDocument<320> doc;
-  doc["id"] = mqtt_client_id;
-  doc["type"] = "sensor_barreira";
-  doc["version"] = "1.0.0";
-  doc["ip"] = WiFi.localIP().toString();
-  doc["rssi"] = WiFi.RSSI();
-  doc["uptime_s"] = (uint32_t)(millis() / 1000);
-  doc["free_heap"] = ESP.getFreeHeap();
-  doc["status"] = "online";
-
-  char json_buffer[320];
-  size_t n = serializeJson(doc, json_buffer);
-
-  String topic = String(mqtt_topic_heartbeat) + "/info";
-  client.publish(topic.c_str(), json_buffer, false);
-  Serial.printf("Informações do dispositivo publicadas: %s\n", json_buffer);
+void publishHeartbeat() {
+  if (!isMqttConnected()) {
+    return;
+  }
+  // The heartbeat is a simple "online" message, retained by the broker.
+  if (mqttClient.publish(MQTT_TOPIC_HEARTBEAT, "online", true)) {
+    Serial.println(F("[MQTT] Heartbeat 'online' published."));
+  } else {
+    Serial.println(F("[MQTT] Failed to publish heartbeat."));
+  }
 }
 
-// ===== Ciclo =====
-void mqtt_loop() { client.loop(); }
+// =====================================================================
+// Status and Utility Functions
+// =====================================================================
 
-// ===== Status / debug =====
-bool is_mqtt_connected() { return client.connected(); }
-
-void print_mqtt_stats() {
-  Serial.println("\n=== ESTATÍSTICAS MQTT ===");
-  Serial.printf("Conectado: %s\n", client.connected() ? "Sim" : "Não");
-  Serial.printf("Broker: %s:%d\n", mqtt_server, mqtt_port);
-  Serial.printf("Client ID: %s\n", mqtt_client_id);
-  Serial.printf("Tópico Estado: %s\n", mqtt_topic_state);
-  Serial.printf("Tópico Heartbeat: %s\n", mqtt_topic_heartbeat);
-  Serial.printf("Última tentativa: %lu ms atrás\n", millis() - lastReconnectAttempt);
-  Serial.println("========================\n");
+bool isMqttConnected() {
+  return mqttClient.connected();
 }

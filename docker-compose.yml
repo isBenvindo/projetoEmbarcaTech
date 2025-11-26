@@ -1,19 +1,21 @@
 services:
   db:
-    image: postgres:17
+    image: postgres:15-alpine
     container_name: terelina_db
     environment:
-      POSTGRES_DB: terelina_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      # These variables are read from the .env file in the project's root directory.
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # aplica o schema na primeira subida do banco
-      - ./back-end/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+      # This volume initializes the database with our schema on the first run.
+      - ./back-end/schema.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      - "5432:5432"   # deixe aberto só se precisar acessar fora do Docker
+      # Expose port 5432 only if you need to access the database from outside the Docker environment.
+      - "5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d terelina_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -24,31 +26,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    environment:
-      # Banco
-      DB_HOST: db
-      DB_NAME: terelina_db
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      DB_PORT: "5432"
-      # App
-      HOST: 0.0.0.0
-      PORT: "8000"
-      LOG_LEVEL: INFO
-      # MQTT (usa HiveMQ público)
-      MQTT_BROKER_HOST: broker.hivemq.com
-      MQTT_BROKER_PORT: "1883"
-      MQTT_TOPIC_STATE: sensores/barreira/estado
-      MQTT_CLIENT_ID: terelina_backend
-    depends_on:
-      db:
-        condition: service_healthy
+    env_file:
+      # Aponta para o arquivo .env que contém todas as configurações.
+      # Como o .env agora está na raiz, o caminho é apenas este.
+      - ./.env  # <-- CERTIFIQUE-SE QUE ESTA LINHA ESTÁ AQUI E CORRETA
     ports:
       - "8000:8000"
+    depends_on:
+      db:
+        # Ensures that the backend will only start after the database is healthy and ready.
+        condition: service_healthy
     restart: unless-stopped
-    # se quiser ver/logar arquivos fora do container:
-    # volumes:
-    #   - ./back-end/terelina_backend.log:/app/terelina_backend.log
 
 volumes:
+  # The named volume 'pgdata' ensures that the database data persists even if the container is removed.
   pgdata:

@@ -5,20 +5,53 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 
-// Instância global do cliente MQTT (declarada em mqtt.cpp)
-extern PubSubClient client;
+// Global instance of the MQTT client, defined in mqtt.cpp
+extern PubSubClient mqttClient;
 
-// ===== Setup / ciclo =====
-void mqtt_init();                 // NOVO: setServer, buffer, keepalive, etc.
-void reconnect_mqtt();
-void mqtt_loop();
+// =====================================================================
+// Core MQTT Functions (Initialization and Loop)
+// =====================================================================
 
-// ===== Publicações =====
-void publish_sensor_state(bool is_free);
-void publish_device_info();
+/**
+ * @brief Initializes the MQTT client with broker details and sets up the callback.
+ * Must be called once in the main setup() function.
+ */
+void setupMqtt();
 
-// ===== Status / debug =====
-bool is_mqtt_connected();
-void print_mqtt_stats();
+/**
+ * @brief Handles the MQTT connection and subscription logic.
+ * Call this in the main loop() to maintain the connection.
+ */
+void handleMqttConnection();
 
-#endif
+/**
+ * @brief Keeps the MQTT client running. Call this in every main loop() iteration.
+ */
+void loopMqtt();
+
+// =====================================================================
+// Data Publishing Functions
+// =====================================================================
+
+/**
+ * @brief Publishes the current state of the barrier sensor.
+ * @param isInterrupted True if the beam is broken, false otherwise.
+ */
+void publishSensorState(bool isInterrupted);
+
+/**
+ * @brief Publishes a heartbeat message to indicate the device is online.
+ */
+void publishHeartbeat();
+
+// =====================================================================
+// Status and Utility Functions
+// =====================================================================
+
+/**
+ * @brief Checks if the MQTT client is currently connected to the broker.
+ * @return True if connected, false otherwise.
+ */
+bool isMqttConnected();
+
+#endif // MQTT_H

@@ -1,15 +1,25 @@
 #ifndef WIFI_MANAGER_H
 #define WIFI_MANAGER_H
 
-#include <WiFi.h>
+#include <Arduino.h>
 
-// Funções principais
-void setup_wifi();
+/**
+ * @brief Initializes and manages the WiFi connection.
+ * On first boot, or if the connection fails, it starts a configuration portal (Access Point).
+ * Otherwise, it connects to the last known network. This is a blocking function.
+ */
+void setupWifi();
 
-// Funções auxiliares
-bool is_wifi_connected();
-void reconnect_wifi();
-void print_wifi_info();
-void monitor_wifi();
+/**
+ * @brief Checks if the device is currently connected to a WiFi network.
+ * @return True if connected, false otherwise.
+ */
+bool isWifiConnected();
 
-#endif
+/**
+ * @brief Prints current WiFi network details (IP, SSID, RSSI) to the Serial Monitor.
+ * Useful for debugging.
+ */
+void printWifiStatus();
+
+#endif // WIFI_MANAGER_H

@@ -1,0 +1,12 @@
+SISTEMA DE CONTAGEM DE PIZZAS TERELINA
+
+Este sistema roda em segundo plano. Você não precisa fazer nada no dia a dia.
+
+- Para acessar os painéis, abra o Grafana no seu navegador.
+
+EM CASO DE PROBLEMAS:
+1. Execute o arquivo "STOP_SYSTEM.bat" clicando duas vezes nele.
+2. Aguarde ele terminar.
+3. Execute o arquivo "START_SYSTEM.bat" clicando duas vezes nele.
+
+Se precisar de ajuda, o desenvolvedor pode pedir para você executar o "VIEW_LOGS.bat".

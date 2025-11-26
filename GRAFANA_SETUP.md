@@ -1,345 +1,92 @@
-# Configuração do Grafana - Sistema Terelina
+# Grafana Setup Guide
 
-## Visão Geral
+This guide explains how to connect Grafana to the Terelina project's PostgreSQL database to enable data visualization.
 
-Este guia explica como configurar o Grafana para visualizar os dados de contagem de pizzas do sistema Terelina.  
-O sistema já está preparado com endpoints específicos para Grafana e views otimizadas no PostgreSQL.
-
----
-
-## Pré-requisitos
-
-- **Grafana** instalado (versão 8.0+)
-- **Sistema Terelina** rodando (backend + banco PostgreSQL)
-- **Acesso** ao banco de dados PostgreSQL
+It assumes you have a running Grafana instance and that the project's backend (with the PostgreSQL database) is also running.
 
 ---
 
-## Instalação do Grafana
+## 1. Accessing Grafana
 
-### Ubuntu/Debian
-```bash
-# Adicionar repositório Grafana
-wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
-echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
+By default, Grafana is available at `http://localhost:3000`.
 
-# Instalar Grafana
-sudo apt update
-sudo apt install grafana
+- **Default Username:** `admin`
+- **Default Password:** `admin`
 
-# Iniciar e habilitar serviço
-sudo systemctl start grafana-server
-sudo systemctl enable grafana-server
-````
-
-### Windows
-
-1. Baixar o instalador do [site oficial do Grafana](https://grafana.com/grafana/download)
-2. Executar o instalador
-3. O Grafana estará disponível em `http://localhost:3000`
-
-### Docker
-
-```bash
-docker run -d \
-  --name grafana \
-  -p 3000:3000 \
-  grafana/grafana:latest
-```
+You will be prompted to change the password on your first login.
 
 ---
 
-## Configuração Inicial
+## 2. Configuring the PostgreSQL Data Source
 
-### 1. Acessar Grafana
+To allow Grafana to read data from the project's database, you must configure a new data source.
 
-* Navegar para `http://localhost:3000`
-* Login padrão: `admin` / `admin`
-* Alterar senha ao primeiro acesso
+1.  From the Grafana side menu, navigate to **Connections** > **Data Sources**.
+2.  Click the **"Add new data source"** button.
+3.  Search for and select **"PostgreSQL"**.
 
-### 2. Configurar Data Source PostgreSQL
+4.  Fill in the connection form with the following details:
 
-1. Ir para **Configuration → Data Sources**
-2. Clicar em **"Add data source"**
-3. Selecionar **"PostgreSQL"**
-4. Configurar conexão:
+    - **Name:** `Terelina PostgreSQL` (or any name you prefer)
+    - **Host:** `localhost:5432`
+      - *Note: If your Grafana is running inside a Docker container on the same network as the project, use `db:5432` instead.*
+    - **Database:** `terelina_db`
+    - **User:** `postgres`
+    - **Password:** `postgres`
+      - *Note: These are the default credentials from the project's `docker-compose.yml` file.*
+    - **TLS/SSL Mode:** `disable`
+    - **PostgreSQL Version:** Leave as default or select `15`.
 
-```yaml
-Name: Terelina PostgreSQL
-Host: localhost:5432
-Database: terelina_db
-User: terelina_user
-Password: sua_senha_aqui
-SSL Mode: disable
-```
-
-5. Testar conexão e salvar
+5.  Click the **"Save & test"** button at the bottom. You should see a green checkmark with the message "Database Connection OK".
 
 ---
 
-## Dashboards Recomendados
+## 3. Creating Dashboards
 
-### Dashboard 1: Visão Geral da Produção
+With the data source configured, you are now ready to create dashboards and panels.
 
-* **Título:** "Terelina - Visão Geral da Produção"
-* **Refresh:** 30s
+1.  Navigate to **Dashboards** from the side menu.
+2.  Create a **New Folder** named "Terelina" to keep your dashboards organized.
+3.  Inside the folder, create a **New Dashboard**.
+4.  For each panel, select the `Terelina PostgreSQL` data source and use the query editor in **"Code"** mode to write your SQL queries.
 
-#### Painéis
-
-**1. Total de Pizzas Hoje (Stat)**
-
+**Tip:** Start by testing a simple query to ensure everything is working:
 ```sql
-SELECT total_contagens 
-FROM estatisticas_hoje;
+SELECT
+  date AS "time",
+  total_counts
+FROM daily_counts
+WHERE $__timeFilter(date)
+ORDER BY 1;
 ```
 
-**2. Contagens por Hora (Time Series)**
-
-```sql
-SELECT 
-    hora as time,
-    total_contagens as value
-FROM contagens_por_hora 
-WHERE hora >= $__timeFrom() AND hora <= $__timeTo()
-ORDER BY hora;
-```
-
-**3. Velocidade de Produção (Time Series)**
-
-```sql
-SELECT 
-    hora as time,
-    pizzas_por_hora as value
-FROM velocidade_producao 
-WHERE hora >= $__timeFrom() AND hora <= $__timeTo()
-ORDER BY hora;
-```
-
-**4. Contagens por Dia (Bar Chart)**
-
-```sql
-SELECT 
-    data as time,
-    total_contagens as value
-FROM contagens_por_dia 
-WHERE data >= $__timeFrom() AND data <= $__timeTo()
-ORDER BY data;
-```
+This query uses the optimized daily_counts view and will display the total production for each day in the selected time range.
 
 ---
 
-### Dashboard 2: Monitoramento em Tempo Real
+## 4. Troubleshooting
 
-* **Título:** "Terelina - Monitoramento Tempo Real"
-* **Refresh:** 10s
+**Problem: "Database Connection OK" fails**
 
-#### Painéis
+- **Verify Backend is Running:** Ensure the project's Docker containers are running by executing `docker ps`. You should see `terelina_db` in the list.
+- **Check Host Address:** If Grafana and Docker are on different machines, replace `localhost` with the correct IP address of the machine running the Docker containers.
+- **Check Credentials:** Double-check that the database name, user, and password match the values in the `docker-compose.yml` or your `.env` file.
 
-**1. Últimas Contagens (Time Series)**
+**Problem: Panels show "No data"**
 
-```sql
-SELECT 
-    timestampz as time,
-    1 as value
-FROM contagens_pizzas 
-WHERE timestampz >= $__timeFrom() AND timestampz <= $__timeTo()
-ORDER BY timestampz;
-```
+- **Populate the Database:** The database is empty by default. Make sure you have run the data population script as described in `INSTALLATION.md`.
+- **Check Time Range:** Ensure the time range selected in the top-right corner of your Grafana dashboard (e.g., "Last 1 year") covers the period for which you have generated data.
+- **Test the Query:** Use a database client or the `docker exec` command to connect to the database and run your SQL query directly. This helps confirm if the query itself is correct.
+  ```bash
+  # Using docker-compose (preferred):
+  docker-compose exec -T db psql -U postgres -d terelina_db
 
-**2. Status do Sistema (Stat)**
-
-```sql
-SELECT 
-    CASE 
-        WHEN COUNT(*) > 0 THEN 'Ativo'
-        ELSE 'Inativo'
-    END as value
-FROM contagens_pizzas 
-WHERE timestampz >= NOW() - INTERVAL '1 hour';
-```
+  # Or using the container name directly:
+  docker exec -it terelina_db psql -U postgres -d terelina_db
+  ```
 
 ---
 
-## Configuração de Alertas
+## Security Note
 
-### Alerta 1: Produção Parada
-
-```yaml
-Name: Produção Parada
-Query: 
-  SELECT COUNT(*) as contagens
-  FROM contagens_pizzas 
-  WHERE timestampz >= NOW() - INTERVAL '30 minutes'
-Condition: contagens < 1
-Duration: 5m
-```
-
-### Alerta 2: Baixa Produção
-
-```yaml
-Name: Baixa Produção
-Query:
-  SELECT COUNT(*) as contagens_hora
-  FROM contagens_pizzas 
-  WHERE timestampz >= NOW() - INTERVAL '1 hour'
-Condition: contagens_hora < 10
-Duration: 10m
-```
-
----
-
-## Queries Avançadas
-
-**1. Média Móvel de Produção**
-
-```sql
-SELECT 
-    hora as time,
-    AVG(total_contagens) OVER (
-        ORDER BY hora 
-        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
-    ) as media_movel
-FROM contagens_por_hora 
-WHERE hora >= $__timeFrom() AND hora <= $__timeTo()
-ORDER BY hora;
-```
-
-**2. Comparação com Dia Anterior**
-
-```sql
-SELECT 
-    c1.data as time,
-    c1.total_contagens as hoje,
-    c2.total_contagens as ontem,
-    (c1.total_contagens - c2.total_contagens) as diferenca
-FROM contagens_por_dia c1
-LEFT JOIN contagens_por_dia c2 ON c2.data = c1.data - INTERVAL '1 day'
-WHERE c1.data >= $__timeFrom() AND c1.data <= $__timeTo()
-ORDER BY c1.data;
-```
-
-**3. Horários de Pico**
-
-```sql
-SELECT 
-    EXTRACT(hour FROM timestampz) as hora,
-    COUNT(*) as contagens
-FROM contagens_pizzas 
-WHERE timestampz >= $__timeFrom() AND timestampz <= $__timeTo()
-GROUP BY EXTRACT(hour FROM timestampz)
-ORDER BY contagens DESC;
-```
-
----
-
-## Personalização Visual
-
-### Cores Recomendadas
-
-* **Verde:** Produção normal (> 80% da média)
-* **Amarelo:** Produção moderada (50–80% da média)
-* **Vermelho:** Baixa produção (< 50% da média)
-
-### Configurações de Painéis
-
-**Time Series**
-
-```yaml
-Draw mode: Lines
-Line width: 2
-Fill opacity: 10
-Show points: Never
-```
-
-**Stat**
-
-```yaml
-Unit: short
-Decimals: 0
-Thresholds: 0, 50, 100
-Color mode: value
-```
-
----
-
-## Automação
-
-### Script de Backup de Dashboards
-
-```bash
-#!/bin/bash
-# backup_dashboards.sh
-
-GRAFANA_URL="http://localhost:3000"
-API_KEY="sua_api_key_aqui"
-BACKUP_DIR="/backup/grafana"
-
-mkdir -p $BACKUP_DIR
-
-curl -H "Authorization: Bearer $API_KEY" \
-     "$GRAFANA_URL/api/search?type=dash-db" | \
-jq -r '.[].uid' | \
-while read uid; do
-    curl -H "Authorization: Bearer $API_KEY" \
-         "$GRAFANA_URL/api/dashboards/uid/$uid" | \
-    jq '.dashboard' > "$BACKUP_DIR/dashboard_$uid.json"
-done
-```
-
----
-
-## Troubleshooting
-
-### Problemas Comuns
-
-**1. Dados não aparecem**
-
-* Verificar backend
-* Testar conexão PostgreSQL
-* Conferir se há registros em `contagens_pizzas`
-
-**2. Queries lentas**
-
-* Garantir índices no banco
-* Usar views otimizadas
-* Limitar dados com `LIMIT`
-
-**3. Timezone incorreto**
-
-```sql
-SHOW timezone;
-SET timezone = 'America/Sao_Paulo';
-```
-
----
-
-## Segurança
-
-### Configurações Recomendadas
-
-```ini
-# /etc/grafana/grafana.ini
-[security]
-allow_embedding = true
-cookie_secure = true
-cookie_samesite = strict
-
-[server]
-protocol = https
-cert_file = /path/to/cert.pem
-key_file = /path/to/key.pem
-```
-
----
-
-## Próximos Passos
-
-1. Configurar alertas por email/SMS
-2. Criar dashboards por turno
-3. Implementar comparações históricas
-4. Adicionar métricas de eficiência
-5. Automatizar backup de dashboards
-
----
-
-**Sistema Terelina v1.0.0 – Integração Grafana pronta para produção**
+- This project uses default credentials for local development (Postgres: `postgres/postgres`, Grafana: `admin/admin`). These are for local testing only — change them before exposing services or using in non-local environments.

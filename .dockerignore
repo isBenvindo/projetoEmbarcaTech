@@ -1,0 +1,25 @@
+# .dockerignore
+
+# Git files
+.git/
+.gitignore
+
+# Python virtual environment and cache
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# IDE and OS specific
+.vscode/
+.idea/
+*.DS_Store
+
+# Local files
+terelina_backend.log
+*.env
