@@ -90,31 +90,29 @@ void loop() {
  * @brief Reads the sensor, applies debounce logic, and publishes if the state changes.
  */
 void handleSensor() {
-    // 'static' variables retain their value between calls to loop().
-    static bool lastPublishedState = isBeamInterrupted;
-    static unsigned long lastFlickerTime = 0;
+    static bool lastStableState = isBeamInterrupted;
+    static bool lastReadState = isBeamInterrupted;
+    static unsigned long lastChangeTime = 0;
 
-    bool currentState = (digitalRead(SENSOR_PIN) == (SENSOR_ACTIVE_LOW ? LOW : HIGH));
+    bool currentRead = (digitalRead(SENSOR_PIN) == (SENSOR_ACTIVE_LOW ? LOW : HIGH));
 
-    if (currentState != lastPublishedState) {
-        // If the state has changed, wait for the debounce delay to ensure it's a stable change.
-        if (millis() - lastFlickerTime > SENSOR_DEBOUNCE_DELAY_MS) {
-            
-            Serial.printf("[Sensor] State change confirmed: %s -> %s\n",
-                          lastPublishedState ? "INTERRUPTED" : "CLEAR",
-                          currentState ? "INTERRUPTED" : "CLEAR");
+    if (currentRead != lastReadState) {
+        lastReadState = currentRead;
+        lastChangeTime = millis();
+        return;
+    }
 
-            // Update the global state and publish it.
-            isBeamInterrupted = currentState;
-            lastPublishedState = currentState;
-            publishSensorState(isBeamInterrupted);
-        }
-    } else {
-        // If the state has not changed, reset the flicker timer.
-        // This means the signal is stable.
-        lastFlickerTime = millis();
+    if ((millis() - lastChangeTime) >= SENSOR_DEBOUNCE_DELAY_MS && currentRead != lastStableState) {
+        Serial.printf("[Sensor] State change confirmed: %s -> %s\n",
+                      lastStableState ? "INTERRUPTED" : "CLEAR",
+                      currentRead ? "INTERRUPTED" : "CLEAR");
+
+        lastStableState = currentRead;
+        isBeamInterrupted = currentRead;
+        publishSensorState(isBeamInterrupted);
     }
 }
+
 
 /**
  * @brief Handles periodic tasks that are not checked in every loop cycle.

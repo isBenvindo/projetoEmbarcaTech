@@ -3,16 +3,13 @@ services:
     image: postgres:15-alpine
     container_name: terelina_db
     environment:
-      # These variables are read from the .env file in the project's root directory.
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # This volume initializes the database with our schema on the first run.
       - ./back-end/schema.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
-      # Expose port 5432 only if you need to access the database from outside the Docker environment.
       - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
@@ -21,23 +18,34 @@ services:
       retries: 10
     restart: unless-stopped
 
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: terelina_mqtt
+    ports:
+      - "1883:1883"
+    volumes:
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
   backend:
     container_name: terelina_backend
     build:
       context: .
       dockerfile: Dockerfile
     env_file:
-      # Aponta para o arquivo .env que contém todas as configurações.
-      # Como o .env agora está na raiz, o caminho é apenas este.
-      - ./.env  # <-- CERTIFIQUE-SE QUE ESTA LINHA ESTÁ AQUI E CORRETA
+      - ./.env
     ports:
       - "8000:8000"
     depends_on:
       db:
-        # Ensures that the backend will only start after the database is healthy and ready.
         condition: service_healthy
+      mqtt:
+        condition: service_started
     restart: unless-stopped
 
 volumes:
-  # The named volume 'pgdata' ensures that the database data persists even if the container is removed.
   pgdata:
+  mosquitto_data:
+  mosquitto_log:
