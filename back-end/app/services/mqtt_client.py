@@ -45,10 +45,10 @@ def _handle_pizza_count(sensor_id: str):
                 # The timestamp is handled by the database's NOW() function
                 cur.execute("INSERT INTO pizza_counts (timestamp) VALUES (NOW())")
                 conn.commit()
-        
+
         logger.info(f"Pizza count saved! Sensor ID: {sensor_id}")
         _log_system_event("INFO", f"Pizza counted from sensor: {sensor_id}")
-        
+
     except Error as e:
         logger.error(f"PostgreSQL error while saving count: {e}")
         _log_system_event("ERROR", f"PostgreSQL error on save: {e}")
@@ -100,7 +100,12 @@ def _on_message(client, userdata, msg):
             return
 
         data = json.loads(payload_str)
-        
+
+        # --- Hardening: JSON must be an object/dict ---
+        if not isinstance(data, dict):
+            logger.warning(f"Message ignored: JSON is not an object/dict: {data!r}")
+            return
+
         state = _normalize_state(data.get("state"))
         if not state:
             logger.warning(f"Message ignored: missing or invalid 'state' field in JSON: {data}")
@@ -112,7 +117,7 @@ def _on_message(client, userdata, msg):
         # Debounce to prevent false positives from sensor flickering
         if _last_transition_ms and (now_ms - _last_transition_ms) < _DEBOUNCE_MS:
             logger.debug(f"State transition ignored due to debounce. New state: {state}")
-            _last_state = state # Update state anyway to prevent false triggers
+            # NOTE: do NOT update _last_state here; keep the previous stable state.
             return
 
         # --- Core Logic: Detect product on state transition ---
@@ -143,9 +148,12 @@ def start_mqtt_client():
 
     try:
         client_id = settings.MQTT_CLIENT_ID or f"terelina_backend_{os.getpid()}"
-        
+
         _client = mqtt.Client(client_id=client_id, protocol=mqtt.MQTTv311)
-        
+
+        # --- Reconnect hardening (prevents reconnect storms) ---
+        _client.reconnect_delay_set(min_delay=1, max_delay=30)
+
         if settings.MQTT_USERNAME and settings.MQTT_PASSWORD:
             _client.username_pw_set(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)
 
@@ -159,10 +167,10 @@ def start_mqtt_client():
             settings.MQTT_BROKER_PORT,
             keepalive=60
         )
-        _client.loop_start() # Starts a background thread for the client
+        _client.loop_start()  # Starts a background thread for the client
         logger.info("MQTT client started successfully.")
         return _client
-    
+
     except Exception as e:
         logger.error(f"Failed to start MQTT client: {e}")
         _log_system_event("ERROR", f"Failed to start MQTT client: {e}")
@@ -181,7 +189,7 @@ def get_mqtt_status():
     """Returns the current status of the MQTT client."""
     if not _client:
         return {"status": "not_initialized", "connected": False}
-    
+
     return {
         "status": "running",
         "connected": _client.is_connected(),

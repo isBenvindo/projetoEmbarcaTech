@@ -54,6 +54,6 @@ node_modules/
 *.tmp
 ~$*
 
-src/secrets.h
-
 grafanaCredentials.txt
+
+implantation.md

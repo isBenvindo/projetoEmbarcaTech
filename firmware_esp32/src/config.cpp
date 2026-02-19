@@ -11,7 +11,9 @@ const char* WIFI_PASSWORD = "";  // Your WiFi network password
 // =====================================================================
 // MQTT Broker Settings
 // =====================================================================
-const char* MQTT_BROKER_HOST   = "broker.hivemq.com"; // Public MQTT broker for testing
+// MQTT_BROKER_HOST must point to the IP/hostname of the machine running Mosquitto.
+// NOTE: The Docker service name "mqtt" works ONLY inside Docker networks, not from the ESP32.
+const char* MQTT_BROKER_HOST   = "192.168.100.73"; // PC com Docker+Mosquitto (usar IP fixo/reserva DHCP)
 const int   MQTT_BROKER_PORT   = 1883;                // Default MQTT port
 const char* MQTT_USER          = "";                  // MQTT username (leave blank if not required)
 const char* MQTT_PASSWORD      = "";                  // MQTT password (leave blank if not required)
