@@ -5,6 +5,7 @@
  * Features:
  * - Captive Portal for on-demand configuration (no hardcoded passwords).
  * - Automatic reconnection to the last known network.
+ * - Maintenance Mode: hold BOOT (GPIO0) for 5s during boot to clear saved WiFi and force portal.
  * - Optional secure fallback via secrets.h (compile-time gated).
  * - Avoids infinite reboot loops: if fallback fails, returns to portal mode.
  */
@@ -26,6 +27,13 @@
 #endif
 
 // =====================================================================
+// Maintenance Mode Settings
+// =====================================================================
+// BOOT button on most ESP32 devkits is GPIO0 (active LOW).
+static constexpr int      MAINT_PIN   = 0;       // GPIO0 (BOOT)
+static constexpr uint32_t MAINT_HOLD_MS = 5000;  // 5 seconds hold to trigger
+
+// =====================================================================
 // Private helpers
 // =====================================================================
 
@@ -38,7 +46,6 @@ static void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
             Serial.print(F("[WiFi Event] Disconnected from AP. Reason: "));
             Serial.println((int)info.wifi_sta_disconnected.reason);
-            // ESP32 will attempt to reconnect automatically (we also enforce it in setupWifi()).
             break;
 
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
@@ -60,6 +67,52 @@ static String buildApName() {
     char buf[32];
     snprintf(buf, sizeof(buf), "Terelina-%04X", suffix);
     return String(buf);
+}
+
+static bool maintenanceRequested() {
+    // Check only at boot time. Holding BOOT (GPIO0) LOW for MAINT_HOLD_MS triggers maintenance.
+    pinMode(MAINT_PIN, INPUT_PULLUP);
+    delay(30); // stabilize read
+
+    if (digitalRead(MAINT_PIN) == HIGH) {
+        return false; // not pressed
+    }
+
+    Serial.println(F("[WiFi] BOOT detected. Hold for 5s to enter Maintenance Mode..."));
+
+    uint32_t start = millis();
+    while (millis() - start < MAINT_HOLD_MS) {
+        if (digitalRead(MAINT_PIN) == HIGH) {
+            Serial.println(F("[WiFi] Maintenance canceled (button released)."));
+            return false;
+        }
+
+        // Optional progress tick each second (non-spammy)
+        static uint32_t lastTick = 0;
+        uint32_t elapsed = millis() - start;
+        if (elapsed - lastTick >= 1000) {
+            lastTick = elapsed;
+            uint32_t remaining = (MAINT_HOLD_MS - elapsed + 999) / 1000;
+            Serial.print(F("[WiFi] Holding... "));
+            Serial.print(remaining);
+            Serial.println(F("s"));
+        }
+
+        delay(10);
+    }
+
+    Serial.println(F("[WiFi] Maintenance Mode confirmed."));
+    return true;
+}
+
+static void clearSavedWifi(WiFiManager& wm) {
+    Serial.println(F("[WiFi] Clearing saved WiFi credentials (WiFiManager + ESP32 WiFi)..."));
+    // Clears WiFiManager saved credentials
+    wm.resetSettings();
+
+    // Clears ESP32 WiFi stored credentials (NVS for WiFi)
+    WiFi.disconnect(true, true);
+    delay(200);
 }
 
 static bool tryFallbackCredentials(uint32_t timeoutMs = 20000) {
@@ -106,12 +159,18 @@ void setupWifi() {
 
     WiFiManager wm;
 
+    // Unique AP name
+    String apName = buildApName();
+
+    // Maintenance Mode: hold BOOT during boot to clear creds and force portal
+    if (maintenanceRequested()) {
+        clearSavedWifi(wm);
+    }
+
     // Portal timeout: if nobody configures within this time, we can try fallback
     // or re-open portal again without reboot loop.
     wm.setConfigPortalTimeout(180); // 3 minutes
 
-    // Unique AP name
-    String apName = buildApName();
     Serial.print(F("[WiFi] Starting connection via WiFiManager. AP name: "));
     Serial.println(apName);
 
@@ -128,11 +187,8 @@ void setupWifi() {
             Serial.println(F("[WiFi] No connection. Re-opening portal (no reboot loop)."));
 
             // Start config portal and wait until configured (blocking, but predictable in the field).
-            // You can change to startConfigPortal + manual loop if you want non-blocking behavior.
             wm.setConfigPortalTimeout(0); // 0 = no timeout (wait indefinitely)
             if (!wm.startConfigPortal(apName.c_str())) {
-                // In practice startConfigPortal should not return false with timeout=0,
-                // but if it does, we fallback to a safe reboot.
                 Serial.println(F("[WiFi] CRITICAL: Config portal failed unexpectedly. Rebooting..."));
                 delay(3000);
                 ESP.restart();
